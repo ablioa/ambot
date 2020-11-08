@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# 本地文件管理
+remote_repo_path=/data/res/in
+local_repo_path=repo
+local_temp_path=temp
+
+download_lock=.download.lock
+retrieve_lock=.retrieve.lock
+
+# 文件下载
+download(){
+	files=$(ssh wangzh@warmcode.net "ls ${remote_repo_path}");
+
+	for file in ${files[*]}
+	do
+		rmd5=$(ssh wangzh@warmcode.net "md5sum ${remote_repo_path}/${file}" | awk '{print $1}');
+		scp "wangzh@warmcode.net:${remote_repo_path}/${file}" "${temp}/${file}"
+		if [ $? -eq 0 ]; then
+			lmd5=$(md5sum "temp/${file}" | awk '{print $1}');
+			if [ "${lmd5}" == "${rmd5}" ]; then
+			   mv ${local_temp_path}/${file} ${local_repo_path}
+			   ssh wangzh@warmcode.net "rm ${remote_repo_path}/${file}";
+			fi
+		fi
+	done
+}
+
+usage(){
+    echo "Usage: $0 [options]";
+	echo "  -d 同步远程下载文件";
+	echo "  -r 提取仓库文件";
+	echo "  -k 根据关键字提取文件";
+	echo "  -j 根据文档清单删除文件";
+}
+
+while getopts "drkj" opt; do
+    case ${opt} in
+		d){
+			if [ -e ${download_lock} ]; then
+				echo "download process is already running now!";
+			else
+				touch ${download_lock};
+				download;
+				rm ${download_lock}
+			fi
+			exit;
+		};;
+		r) {
+			if [ -e ${retrieve_lock} ]; then
+				echo "retrieve process is already running now!";
+			else
+				touch ${retrieve_lock};
+				download;
+				rm ${retrieve_lock}
+			fi
+			exit;
+			exit
+		};;
+		k) {
+			echo "get file with keyword.";
+			exit;
+		};;
+		j) {
+			echo "remove file from list";
+			exit ;
+			exit;
+		};;
+	esac
+done
+
+usage;
