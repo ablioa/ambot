@@ -8,6 +8,30 @@ local_temp_path=temp
 download_lock=.download.lock
 retrieve_lock=.retrieve.lock
 
+REDIS_PWD='abc123'
+REDIS_CMD="/soft/redis/redis-master/bin/redis-cli -a ${REDIS_PWD}"
+
+redis_set(){
+	dkey="$1";
+	dval="$2";
+	${REDIS_CMD} set "${dkey}" "${dval}" 2>/dev/null;
+}
+
+redis_get(){
+	dkey="${1}";
+	${REDIS_CMD} get "${dkey}" 2>/dev/null;
+}
+
+redis_api_test(){
+	data_key='02a2c3ae-0535-11e9-a1f1-00163e025849'
+	data_val='/media/hd1/repository/03/02a2c3ae-0535-11e9-a1f1-00163e025849.pdf'
+	dval=999
+	redis_set "${data_key}" "${dval}"
+
+	newval=$(redis_get "${data_key}");
+	echo "val: ${newval}"
+}
+
 # 文件下载
 download(){
 	files=$(ssh wangzh@warmcode.net "ls ${remote_repo_path}");
@@ -15,13 +39,19 @@ download(){
 	for file in ${files[*]}
 	do
 		rmd5=$(ssh wangzh@warmcode.net "md5sum ${remote_repo_path}/${file}" | awk '{print $1}');
-		scp "wangzh@warmcode.net:${remote_repo_path}/${file}" "${temp}/${file}"
-		if [ $? -eq 0 ]; then
+		echo "hello: ${remote_repo_path}/${file}"
+		scp "wangzh@warmcode.net:${remote_repo_path}/${file}" "${local_temp_path}/${file}"
+		ret=$?
+		if [ ${ret} -eq 0 ]; then
+		    echo "hello:1"
 			lmd5=$(md5sum "temp/${file}" | awk '{print $1}');
 			if [ "${lmd5}" == "${rmd5}" ]; then
 			   mv ${local_temp_path}/${file} ${local_repo_path}
+			   echo ${local_temp_path}/${file} ${local_repo_path}
 			   ssh wangzh@warmcode.net "rm ${remote_repo_path}/${file}";
 			fi
+		else
+			echo "hello 2: ${ret}"
 		fi
 	done
 }
@@ -37,6 +67,7 @@ usage(){
 while getopts "drkj" opt; do
     case ${opt} in
 		d){
+			echo "locl: ${download_lock}"
 			if [ -e ${download_lock} ]; then
 				echo "download process is already running now!";
 			else
