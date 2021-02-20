@@ -55,10 +55,43 @@ sync(){
 	rm ${download_lock}
 }
 
+# 从仓库总移除文件
+delete_from_repository(){
+	${DB_CON} "select book_code from book where opstatus='04'" 2>/dev/null | while read bcode
+	do
+	    bpath=$(redis_get ${bcode});
+	    if [ ! -z ${bpath} ]; then
+		    echo "book_to_remve: ${bcode} : ${bpath}";
+			mv -v "${bpath}" "trash/";
+			if [ $? -eq 0 ]; then
+				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" 2>/dev/null;
+			    # TODO 删除redis缓存中的路径
+			fi
+		else
+			echo "FILE NOT FOUND: ${bcode}";
+		fi
+	done;
+}
+
+refresh_redis(){
+	repository_path=/media/hd0/repository/00;
+	ls ${repository_path} | while read file
+	do
+		fcode=${file:0:36}
+	    fpath="${repository_path}/${file}";
+		redis_set "${fcode}" "${fpath}";
+		echo "file_to_handle: ${file} : ${fcode} : ${fpath}";
+	done
+
+	echo "refresh redis";
+}
+
+
 usage(){
     echo "Usage: $0 [options]";
 	echo "  -s 同步远程下载文件";
 	echo "  -r 提取仓库文件";
+	echo "  -f 刷新路径缓存";
 	echo "  -k 根据关键字提取文件";
 	echo "  -j 根据文档清单删除文件";
 }
@@ -66,10 +99,20 @@ usage(){
 basepath=$(cd `dirname $0`;pwd);
 cd ${basepath}
 
-while getopts "srkj" opt; do
+. .amarcres
+
+while getopts "fsdrkj" opt; do
     case ${opt} in
 		s){
 			sync;
+			exit;
+		};;
+        f){
+			refresh_redis;
+			exit;
+		};;
+        d){
+			delete_from_repository;
 			exit;
 		};;
 		r) {
