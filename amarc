@@ -23,6 +23,17 @@ redis_get(){
 	${REDIS_CMD} get "${dkey}" 2>/dev/null;
 }
 
+redis_delete(){
+    dkey="${1}";
+	${REDIS_CMD} del "${dkey}" 2>/dev/null;
+}
+
+test_redis_delete(){
+	dkey="aaaa";
+	redis_delete "${dkey}";
+	echo "test redis delete";
+}
+
 # 同步远程下载的文件
 sync(){
 	if [ -e ${download_lock} ]; then
@@ -65,7 +76,7 @@ delete_from_repository(){
 			mv -v "${bpath}" "trash/";
 			if [ $? -eq 0 ]; then
 				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" 2>/dev/null;
-			    # TODO 删除redis缓存中的路径
+			    redis_delete "${bcode}";
 			fi
 		else
 			echo "FILE NOT FOUND: ${bcode}";
@@ -73,6 +84,8 @@ delete_from_repository(){
 	done;
 }
 
+# 1. 本地文件个更新进去
+# 2. 删除的清除掉
 refresh_redis(){
 	repository_path=/media/hd0/repository/00;
 	ls ${repository_path} | while read file
@@ -86,12 +99,12 @@ refresh_redis(){
 	echo "refresh redis";
 }
 
-
 usage(){
     echo "Usage: $0 [options]";
 	echo "  -s 同步远程下载文件";
 	echo "  -r 提取仓库文件";
 	echo "  -f 刷新路径缓存";
+	echo "  -t 测试功能"
 	echo "  -k 根据关键字提取文件";
 	echo "  -j 根据文档清单删除文件";
 }
@@ -101,7 +114,7 @@ cd ${basepath}
 
 . .amarcres
 
-while getopts "fsdrkj" opt; do
+while getopts "ftsdrkj" opt; do
     case ${opt} in
 		s){
 			sync;
@@ -111,6 +124,7 @@ while getopts "fsdrkj" opt; do
 			refresh_redis;
 			exit;
 		};;
+        t){ test_redis_delete; exit; };;
         d){
 			delete_from_repository;
 			exit;
