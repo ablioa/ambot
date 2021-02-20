@@ -64,6 +64,9 @@ usage(){
 	echo "  -j 根据文档清单删除文件";
 }
 
+basepath=$(cd `dirname $0`;pwd);
+cd ${basepath}
+
 while getopts "drkj" opt; do
     case ${opt} in
 		d){
