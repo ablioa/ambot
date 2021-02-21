@@ -41,7 +41,7 @@ redis_get(){
 # 删除redis字串数据
 redis_delete(){
     dkey="${1}";
-	${REDIS_CMD} del "${dkey}" 2>/dev/null;
+	${REDIS_CMD} del "${dkey}" &>/dev/null;
 }
 
 test_redis_delete(){
@@ -88,10 +88,10 @@ delete_from_repository(){
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ ! -z ${bpath} ]; then
-		    echo "book_to_remve: ${bcode} : ${bpath}";
+		    echo "book_to_remove: ${bcode} : ${bpath}";
 			mv -v "${bpath}" "trash/";
 			if [ $? -eq 0 ]; then
-				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" 2>/dev/null;
+				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
 			    redis_delete "${bcode}";
 			fi
 		else
