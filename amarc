@@ -12,17 +12,20 @@ retrieve_lock=.retrieve.lock
 REDIS_PWD='abc123'
 REDIS_CMD="/soft/redis/redis-master/bin/redis-cli -a ${REDIS_PWD}"
 
+# 设置redis字串数据
 redis_set(){
 	dkey="$1";
 	dval="$2";
 	${REDIS_CMD} set "${dkey}" "${dval}" 2>/dev/null;
 }
 
+# 查询redis字串数据
 redis_get(){
 	dkey="${1}";
 	${REDIS_CMD} get "${dkey}" 2>/dev/null;
 }
 
+# 删除redis字串数据
 redis_delete(){
     dkey="${1}";
 	${REDIS_CMD} del "${dkey}" 2>/dev/null;
