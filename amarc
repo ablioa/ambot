@@ -1,5 +1,18 @@
 #!/bin/bash
 
+###############################################################################
+# 命令选项
+# -s 同步远程下载文件 
+# -d 删除废弃的文件
+# -r 从仓库中提取文件
+# -f 刷新路径缓存
+#
+# 服务安装
+# * * * * * /soft/amarc/amarc -s 1>>/soft/amarc/log/sync.txt &
+# * * * * * /soft/amarc/amarc -d 1>>/soft/amarc/log/delete.txt &
+# * * * * * /soft/amarc/amarc -r 1>>/soft/amarc/log/retrieve.txt &
+###############################################################################
+
 # 本地文件管理
 remote_host=wangzh@warmcode.net
 remote_repo_path=/data/res/in
