@@ -29,7 +29,7 @@ REDIS_CMD="/soft/redis/redis-master/bin/redis-cli -a ${REDIS_PWD}"
 redis_set(){
 	dkey="$1";
 	dval="$2";
-	${REDIS_CMD} set "${dkey}" "${dval}" 2>/dev/null;
+	${REDIS_CMD} set "${dkey}" "${dval}" &>/dev/null;
 }
 
 # 查询redis字串数据
@@ -53,7 +53,6 @@ test_redis_delete(){
 # 同步远程下载的文件
 sync(){
 	if [ -e ${download_lock} ]; then
-	    echo "download process is already running now!";
 	    return;
 	fi
 	
