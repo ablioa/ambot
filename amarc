@@ -102,6 +102,31 @@ refresh_redis(){
 	echo "refresh redis";
 }
 
+# 从仓库总提取数据
+retrieve_from_repository(){
+    if [ -e ${retrieve_lock} ]; then
+	    echo "retrieve process is already running now!";
+        return;
+	fi
+
+	touch ${retrieve_lock};
+
+    ${DB_CON} "select book_code from bag where bag_status=0" 2>/dev/null | while read bcode
+	do
+	    bpath=$(redis_get ${bcode});
+	    if [ -z ${bpath} ]; then
+			echo "文件不存在: ${bcode}";
+		else
+			bname=$(${DB_CON} "select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book where book_code=\"${bcode}\"");
+		    echo "book_to_handle: ${bcode} -> ${bpath} -> ${bname}.pdf";
+		    mv -v ${bpath} "trunk/${bname}.pdf";
+			${DB_CON} "update bag set bag_status=1 where book_code=\"${bcode}\"" 2>/dev/null;
+		fi
+	done
+
+	rm ${retrieve_lock}
+}
+
 usage(){
     echo "Usage: $0 [options]";
 	echo "  -s 同步远程下载文件";
@@ -119,39 +144,13 @@ cd ${basepath}
 
 while getopts "ftsdrkj" opt; do
     case ${opt} in
-		s){
-			sync;
-			exit;
-		};;
-        f){
-			refresh_redis;
-			exit;
-		};;
+		s){ sync; exit; };;
+        f){ refresh_redis; exit; };;
         t){ test_redis_delete; exit; };;
-        d){
-			delete_from_repository;
-			exit;
-		};;
-		r) {
-			if [ -e ${retrieve_lock} ]; then
-				echo "retrieve process is already running now!";
-			else
-				touch ${retrieve_lock};
-				download;
-				rm ${retrieve_lock}
-			fi
-			exit;
-			exit
-		};;
-		k) {
-			echo "get file with keyword.";
-			exit;
-		};;
-		j) {
-			echo "remove file from list";
-			exit ;
-			exit;
-		};;
+        d){ delete_from_repository; exit; };;
+		r){ retrieve_from_repository; exit; };;
+		k){ echo "get file with keyword."; exit; };;
+		j) { echo "remove file from list"; exit; };;
 	esac
 done
 
