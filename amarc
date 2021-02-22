@@ -73,7 +73,7 @@ sync(){
 			   dval="${local_repo_path}/${file}";
 
 			   redis_set "${dkey}" "${dval}";
-			   echo "${dkey} : ${dval}";
+			   amlog "${dkey} : ${dval}";
 			fi
 		fi
 	done
@@ -87,7 +87,7 @@ delete_from_repository(){
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ ! -z ${bpath} ]; then
-		    echo "book_to_remove: ${bcode} : ${bpath}";
+		    amlog "book_to_remove: ${bcode} : ${bpath}";
 			mv -v "${bpath}" "trash/";
 			if [ $? -eq 0 ]; then
 				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
