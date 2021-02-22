@@ -130,8 +130,8 @@ retrieve_from_repository(){
 			echo "文件不存在: ${bcode}";
 		else
 			bname=$(${DB_CON} "select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book where book_code=\"${bcode}\"");
-		    echo "book_to_handle: ${bcode} -> ${bpath} -> ${bname}.pdf";
-		    mv -v ${bpath} "trunk/${bname}.pdf";
+		    echo "${bcode} -> ${bpath} -> ${bname}.pdf";
+		    cp -v ${bpath} "trunk/${bname}.pdf";
 			${DB_CON} "update bag set bag_status=1 where book_code=\"${bcode}\"" 2>/dev/null;
 		fi
 	done
