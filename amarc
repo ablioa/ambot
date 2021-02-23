@@ -108,10 +108,8 @@ refresh_redis(){
 		fcode=${file:0:36}
 	    fpath="${repository_path}/${file}";
 		redis_set "${fcode}" "${fpath}";
-		echo "file_to_handle: ${file} : ${fcode} : ${fpath}";
+		amlog "${fcode} : ${fpath}";
 	done
-
-	echo "refresh redis";
 }
 
 # 从仓库总提取数据
