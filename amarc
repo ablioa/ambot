@@ -25,32 +25,26 @@ retrieve_lock=.retrieve.lock
 REDIS_PWD='abc123'
 REDIS_CMD="/soft/redis/redis-master/bin/redis-cli -a ${REDIS_PWD}"
 
-# 设置redis字串数据
+# set redis string value
 redis_set(){
 	dkey="$1";
 	dval="$2";
 	${REDIS_CMD} set "${dkey}" "${dval}" &>/dev/null;
 }
 
-# 查询redis字串数据
+# get redis string value
 redis_get(){
 	dkey="${1}";
 	${REDIS_CMD} get "${dkey}" 2>/dev/null;
 }
 
-# 删除redis字串数据
+# delete redis string value
 redis_delete(){
     dkey="${1}";
 	${REDIS_CMD} del "${dkey}" &>/dev/null;
 }
 
-test_redis_delete(){
-	dkey="aaaa";
-	redis_delete "${dkey}";
-	echo "test redis delete";
-}
-
-# 同步远程下载的文件
+# download documents from remote server
 sync(){
 	if [ -e ${download_lock} ]; then
 	    return;
@@ -81,13 +75,13 @@ sync(){
 	rm ${download_lock}
 }
 
-# 从仓库总移除文件
+# remove documents from local repository
 delete_from_repository(){
 	${DB_CON} "select book_code from book where opstatus='04'" 2>/dev/null | while read bcode
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ ! -z ${bpath} ]; then
-			mv -v "${bpath}" "trash/";
+			mv -v "${bpath}" "trash/" &>/dev/null;
 			if [ $? -eq 0 ]; then
 		        amlog "book_to_remove: ${bcode} : ${bpath}";
 				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
@@ -99,8 +93,9 @@ delete_from_repository(){
 	done;
 }
 
-# 1. 本地文件个更新进去
-# 2. 删除的清除掉
+# refresh redis cache
+# 1. add local items into cache
+# 2. remove invalid ones.
 refresh_redis(){
 	repository_path=/media/hd0/repository/00;
 	ls ${repository_path} | while read file
@@ -112,7 +107,7 @@ refresh_redis(){
 	done
 }
 
-# 从仓库总提取数据
+# retrieve items from local repository
 retrieve_from_repository(){
     if [ -e ${retrieve_lock} ]; then
 	    echo "retrieve process is already running now!";
@@ -125,11 +120,11 @@ retrieve_from_repository(){
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ -z ${bpath} ]; then
-			echo "文件不存在: ${bcode}";
+			amlog "file not found in local repository: ${bcode}";
 		else
 			bname=$(${DB_CON} "select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book where book_code=\"${bcode}\"");
-		    echo "${bcode} -> ${bpath} -> ${bname}.pdf";
-		    cp -v ${bpath} "trunk/${bname}.pdf";
+		    amlog "${bpath} -> ${bname}.pdf";
+		    cp -v ${bpath} "trunk/${bname}.pdf" &>/dev/null;
 			${DB_CON} "update bag set bag_status=1 where book_code=\"${bcode}\"" 2>/dev/null;
 		fi
 	done
@@ -139,12 +134,11 @@ retrieve_from_repository(){
 
 usage(){
     echo "Usage: $0 [options]";
-	echo "  -s 同步远程下载文件";
-	echo "  -r 提取仓库文件";
-	echo "  -f 刷新路径缓存";
-	echo "  -t 测试功能"
-	echo "  -k 根据关键字提取文件";
-	echo "  -j 根据文档清单删除文件";
+	echo "  -s download documents from remote server.";
+	echo "  -r retrieve documents from local repository";
+	echo "  -d remove items from local reposirory";
+	echo "  -f update redis cache";
+	echo "  -t for test"
 }
 
 basepath=$(cd `dirname $0`;pwd);
@@ -152,15 +146,13 @@ cd ${basepath}
 
 . .amarcres
 
-while getopts "ftsdrkj" opt; do
+while getopts "srdft" opt; do
     case ${opt} in
 		s){ sync; exit; };;
         f){ refresh_redis; exit; };;
         t){ test_redis_delete; exit; };;
         d){ delete_from_repository; exit; };;
 		r){ retrieve_from_repository; exit; };;
-		k){ echo "get file with keyword."; exit; };;
-		j) { echo "remove file from list"; exit; };;
 	esac
 done
 
