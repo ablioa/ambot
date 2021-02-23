@@ -87,9 +87,9 @@ delete_from_repository(){
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ ! -z ${bpath} ]; then
-		    amlog "book_to_remove: ${bcode} : ${bpath}";
 			mv -v "${bpath}" "trash/";
 			if [ $? -eq 0 ]; then
+		        amlog "book_to_remove: ${bcode} : ${bpath}";
 				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
 			    redis_delete "${bcode}";
 			fi
