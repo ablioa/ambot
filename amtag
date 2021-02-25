@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# update image sizeof today's file
+get_image_height(){
+	tempdir=temp
+	if [ ! -e ${tempdir} ]; then
+	    mkdir ${tempdir}
+	fi
+
+	today=$(date '+%Y-%m-%d');
+	iurl="http://res.warmcode.net/cover/"
+	${DB_CON} "select book_code from book where date(ts)=\"${today}\"" 2>/dev/null | while read bcode
+	do
+	    purl="${iurl}${bcode}.png";
+	    wget ${purl} -O ${tempdir}/${bcode}.png &>/dev/null;
+		if [ $? -eq 0 ]; then
+			# get height of the image
+			height=$(identify -format '%h' ${tempdir}/${bcode}.png);
+		    amlog "${bcode} -${height}- ${purl}";
+		fi
+	done
+}
+
+# 
+function_b(){
+    echo "function bbb";
+}
+
+usage(){
+    echo "Usage: $0 [options]";
+	echo " -a get image height";
+	echo " -b function bbb";
+}
+
+basepath=$(cd `dirname $0`;pwd);
+cd ${basepath}
+
+. .amarcres
+
+while getopts "ab" opt; do
+    case ${opt} in
+		a){ get_image_height; exit; };;
+        b){ function_b; exit; };;
+	esac
+done
+
+usage;
