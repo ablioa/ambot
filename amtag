@@ -9,14 +9,18 @@ get_image_height(){
 
 	today=$(date '+%Y-%m-%d');
 	iurl="http://res.warmcode.net/cover/"
-	${DB_CON} "select book_code from book where date(ts)=\"${today}\"" 2>/dev/null | while read bcode
+	${DB_CON} "select book_code from book where date(ts)=\"${today}\" and image_height is null" &>/dev/null | while read bcode
 	do
 	    purl="${iurl}${bcode}.png";
 	    wget ${purl} -O ${tempdir}/${bcode}.png &>/dev/null;
 		if [ $? -eq 0 ]; then
 			# get height of the image
 			height=$(identify -format '%h' ${tempdir}/${bcode}.png);
+			sql="update book set image_height=${height} where book_code=\"${bcode}\"";
+			${DB_CON} "${sql}" &>/dev/null;
+			
 		    amlog "${bcode} -${height}- ${purl}";
+			rm ${tempdir}/${bcode}.png &>/dev/null;
 		fi
 	done
 }
