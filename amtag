@@ -11,8 +11,6 @@ init(){
 	if [ ! -e ${tempdir} ]; then
 	    mkdir ${tempdir}
 	fi
-	
-	amlog "taging the files now!!";
 }
 
 # update image sizeof today's file
