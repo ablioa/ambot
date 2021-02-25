@@ -1,12 +1,20 @@
 #!/bin/bash
 
-# update image sizeof today's file
-get_image_height(){
-	tempdir=temp
+tempdir=temp
+langpdu=${tempdir}/file.lan
+
+init(){
+    basepath=$(cd `dirname $0`;pwd);
+    cd ${basepath}
+    . .amarcres;
+
 	if [ ! -e ${tempdir} ]; then
 	    mkdir ${tempdir}
 	fi
+}
 
+# update image sizeof today's file
+get_image_height(){
 	today=$(date '+%Y-%m-%d');
 	iurl="http://res.warmcode.net/cover/"
 	${DB_CON} "select book_code from book where date(ts)=\"${today}\" and image_height is null" &>/dev/null | while read bcode
@@ -25,26 +33,50 @@ get_image_height(){
 	done
 }
 
-# 
-function_b(){
-    echo "function bbb";
+# get title language
+get_title_lang(){
+	today=$(date '+%Y-%m-%d');
+	sql="select concat(book_code,book_name) from book where date(ts)=\"${today}\" and title_lang is null and opstatus !='05' limit 10";
+	${DB_CON} "${sql}" 2>/dev/null | while read fitem
+	do
+		fname="${fitem:36}";
+		fcode="${fitem:0:36}";
+
+		amlog "${fcode} - ${fname}";
+		curl -X POST \
+			-H "Content-Type: application/x-www-form-urlencoded; charset=UTF-8" \
+			-d "query=${fname}" \
+			-o ${langpdu}\
+			"https://fanyi.baidu.com/langdetect" 2>/dev/null;
+
+		if [ $? -eq 0 ]; then
+			resp=$(cat ${langpdu});
+			error_code=$(jq ".error" ${langpdu});
+
+			if [  "null" = ${error_code} ]; then
+				amlog "FAILED: ${fname} / ${resp}";
+			else
+				lang=$(jq ".lan" ${langpdu});
+				usql="update book set title_lang=${lang} where book_code=\"${fcode}\"";
+				${DB_CON} "${usql}" &>/dev/null;
+				amlog "OK : ${lang}";
+			fi
+		fi
+	done
 }
 
 usage(){
     echo "Usage: $0 [options]";
 	echo " -a get image height";
-	echo " -b function bbb";
+	echo " -l get language of document name";
 }
 
-basepath=$(cd `dirname $0`;pwd);
-cd ${basepath}
+init;
 
-. .amarcres
-
-while getopts "ab" opt; do
+while getopts "al" opt; do
     case ${opt} in
 		a){ get_image_height; exit; };;
-        b){ function_b; exit; };;
+        l){ get_title_lang; exit; };;
 	esac
 done
 
