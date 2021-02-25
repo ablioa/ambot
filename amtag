@@ -11,13 +11,15 @@ init(){
 	if [ ! -e ${tempdir} ]; then
 	    mkdir ${tempdir}
 	fi
+	
+	amlog "taging the files now!!";
 }
 
 # update image sizeof today's file
 get_image_height(){
 	today=$(date '+%Y-%m-%d');
-	iurl="http://res.warmcode.net/cover/"
-	${DB_CON} "select book_code from book where date(ts)=\"${today}\" and image_height is null" &>/dev/null | while read bcode
+	iurl="http://res.warmcode.net/cover/";
+	${DB_CON} "select book_code from book where date(ts)=\"${today}\" and image_height is null" 2>/dev/null | while read bcode
 	do
 	    purl="${iurl}${bcode}.png";
 	    wget ${purl} -O ${tempdir}/${bcode}.png &>/dev/null;
@@ -36,7 +38,7 @@ get_image_height(){
 # get title language
 get_title_lang(){
 	today=$(date '+%Y-%m-%d');
-	sql="select concat(book_code,book_name) from book where date(ts)=\"${today}\" and title_lang is null and opstatus !='05' limit 10";
+	sql="select concat(book_code,book_name) from book where date(ts)=\"${today}\" and title_lang is null and opstatus !='05'";
 	${DB_CON} "${sql}" 2>/dev/null | while read fitem
 	do
 		fname="${fitem:36}";
