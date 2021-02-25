@@ -5,7 +5,7 @@ DB_PWD="U2F0IFNlcCAgMSAwMDozNDozNyBVVEMgMjAxOAo="
 DB_NAME=bookdb
 DB_HOST=warmcode.net
 
-DB_OPT="-u${DB_USER} -p${DB_PWD} ${DB_NAME} -h ${DB_HOST} -s -e";
+DB_OPT="-u${DB_USER} -p${DB_PWD} ${DB_NAME} -h ${DB_HOST} --default-character-set=utf8 -s -e";
 DB_CMD="mysql";
 DB_CON="${DB_CMD} ${DB_OPT}";
 
