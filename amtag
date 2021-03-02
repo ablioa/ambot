@@ -15,9 +15,17 @@ init(){
 
 # update image sizeof today's file
 get_image_height(){
+	image_lock=".image_lock";
+
+	if [ -e ${image_lock} ]; then
+		amlog "a image tagging task is already running.";
+		return;
+	fi
+
+	touch ${image_lock};
 	today=$(date '+%Y-%m-%d');
 	iurl="http://res.warmcode.net/cover/";
-	${DB_CON} "select book_code from book where date(ts)=\"${today}\" and image_height is null" 2>/dev/null | while read bcode
+	${DB_CON} "select book_code from book where image_height is null and opstatus !='05'" 2>/dev/null | while read bcode
 	do
 	    purl="${iurl}${bcode}.png";
 	    wget ${purl} -O ${tempdir}/${bcode}.png &>/dev/null;
@@ -31,6 +39,8 @@ get_image_height(){
 			rm ${tempdir}/${bcode}.png &>/dev/null;
 		fi
 	done
+
+	rm ${image_lock} &>/dev/null;
 }
 
 # get title language
