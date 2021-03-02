@@ -122,7 +122,7 @@ retrieve_from_repository(){
 	    if [ -z ${bpath} ]; then
 			amlog "file not found in local repository: ${bcode}";
 		else
-			bname=$(${DB_CON} "select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book where book_code=\"${bcode}\"");
+			bname=$(${DB_CON} "select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book where book_code=\"${bcode}\"" 2>/dev/null);
 		    amlog "${bpath} -> ${bname}.pdf";
 		    cp -v ${bpath} "trunk/${bname}.pdf" &>/dev/null;
 			${DB_CON} "update bag set bag_status=1 where book_code=\"${bcode}\"" 2>/dev/null;
