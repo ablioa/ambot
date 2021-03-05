@@ -13,6 +13,95 @@ init(){
 	fi
 }
 
+###############################################################################
+# 1. 用identify提取分辨率，计算总像素数。
+# 2. 使用convert提取直方图，计算过白/黑的像素总数.
+# 3. 评估图片黑白程度
+###############################################################################
+get_book_quality(){
+    statscript=$(cat <<\EOF
+	BEGIN {
+		darkc=0;
+		range=30;
+		black_range=range;
+		white_range=255-range;
+	}
+	{
+		if($5 >= white_range && $3 >= white_range && $4 >= white_range){
+			darkc+=$1;
+		}
+	}
+	END {
+		result=1;
+		ratio=darkc/tcolor;
+		if(ratio * 1000 > 700){
+			result=0;
+		}
+
+		printf("%d\n",result);
+	}
+EOF
+);
+
+    totalcolors=$(identify -format '%wx%h' ${1} | awk -Fx '{print $1*$2}');
+	# 评估图片黑白程度，-v用于向脚本传递参数
+    rst=$(convert ${1} -colors 256 -format "%c" histogram:info: | \
+            sed 'y/:()/,,,/' | \
+            awk -v tcolor=${totalcolors} -F, "${statscript}");
+
+    # 计算出的结果
+    echo "${rst}";
+}
+
+
+get_book_isbn(){
+    batchcode="$1";
+    ldsql="select book_name from book where opstatus !='05' and batch_code=\"${batchcode}\"";
+
+    ${DB_CON} "${ldsql}" 2>/dev/null | while read bname
+    do
+        isbns=$(echo "${bname}" | grep '[0-9]\{10\}\|[0-9]\{13\}\|[0-9]\{9\}X\|[0-9]\{12\}X' -o);
+        if [ $? -eq 0 ]; then
+            isbn=$(echo "${isbns}" | head -1);
+            nname=$(echo "${bname}" | sed "s/${isbn}//g");
+            sql="update book set book_name=\"${nname}\",isbn=\"${isbn}\" where book_name=\"${bname}\"";
+            ${DB_CON} "${sql}" 2>/dev/null;
+        fi
+    done
+}
+
+get_book_publish_year(){
+    batchcode="$1";
+    data=$(echo 20{00..21} 19{80..99});
+
+    for year in $data
+    do
+        fsql="select book_code from book where file_name like \"%${year}%\" and times is null and batch_code=\"${batchcode}\"";
+        ${DB_CON} "${fsql}" 2>/dev/null | while read bcode
+        do
+            amlog "bcode: ${bcode} - year: ${year}";
+            ${DB_CON} "update book set times=\"${year}\" where book_code=\"${bcode}\"" 2>/dev/null;
+        done
+    done
+}
+
+trim_book_name(){
+    batchcode="$1";
+    ldsql="select pk_book from book where batch_code=\"${batchcode}\"";
+
+    ${DB_CON} "${ldsql}" 2>/dev/null | while read bookid
+        do
+            fname=$(${DB_CON} "select book_name from book where pk_book=${bookid}" 2>/dev/null);
+            nfname=$(trim "${fname}");
+                
+            if [ $? -gt 0 ]; then
+                continue;
+            fi;
+
+            ${DB_CON} "update book set book_name=\"${nfname}\" where pk_book=${bookid}" 2>/dev/null;
+    done
+}
+
 # update image sizeof today's file
 get_image_height(){
 	image_lock=".image_lock";
@@ -37,6 +126,8 @@ get_image_height(){
 			
 		    amlog "${bcode} -${height}- ${purl}";
 			rm ${tempdir}/${bcode}.png &>/dev/null;
+		else
+			amlog "remote file not exists: ${bcode}";
 		fi
 	done
 
@@ -79,6 +170,10 @@ usage(){
     echo "Usage: $0 [options]";
 	echo " -a get image height";
 	echo " -l get language of document name";
+	echo " -q get book quality";
+	echo " -i get book isbn";
+	echo " -p get book publish year";
+	echo " -n trim file names";
 }
 
 init;
