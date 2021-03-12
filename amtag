@@ -180,9 +180,9 @@ init;
 
 while getopts "al" opt; do
     case ${opt} in
-		a){ get_image_height; exit; };;
-        l){ get_title_lang; exit; };;
+		a){ get_image_height; };;
+        l){ get_title_lang; };;
+        ?){ usage;};;
 	esac
 done
 
-usage;
