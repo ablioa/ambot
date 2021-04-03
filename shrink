@@ -1,0 +1,51 @@
+#!/bin/bash
+
+imgdir=imgs
+
+# retrieve page count
+page_count(){
+    pc=$(gs -dNOSAFER -q -dNODISPLAY -c "($1) (r) file runpdfbegin pdfpagecount = quit");
+
+	if [ $? -eq 0 ]; then
+        echo ${pc}
+    else
+        echo -1
+    fi
+}
+
+# 创建pdf文件
+compose(){
+#fmt=jpeggray
+	fmt=png16m
+	pages=$2
+	file=$1
+	gs -dLastPage=${pages} \
+	   -dFirstPage=1\
+	   -dNOSAFER \
+	   -r60 \
+	   -dBATCH \
+	   -sDEVICE=${fmt} \
+	   -dNOPAUSE \
+	   -dEPSCrop \
+	   -sOutputFile=imgs/it-%04d.jpg \
+	   ${file}
+}
+
+topdf(){
+	if [ ! -e ${imgdir} ]; then
+		mkdir ${imgdir};
+	fi
+
+	pc=$(page_count $1)
+	if [ ${pc} -gt 0 ]; then
+	    echo "page count is: ${pc}"
+		compose $1 $pc
+        img2pdf imgs/*.jpg > output.pdf
+	else
+		echo "error page"
+	fi
+}
+
+topdf $1
+
+#compose
