@@ -1,0 +1,147 @@
+#!/bin/bash
+
+export PATH=${PATH}:/soft/redis/bin:
+ids_file="ids";
+
+redis_cmd="redis-cli -h warmcode.net -p 6380 -a abc123 -n 2"
+
+# ttl for tasks
+# 262800 72H
+# 172800 48H
+# xxxxxx 24H
+# xxxxxx 12h
+
+add_into_cache(){
+    hash="$1";
+    HASH_LIFE_SPAN=259200
+    ${redis_cmd} set "${hash}" "${hash}" EX ${HASH_LIFE_SPAN} &>/dev/null;
+}
+
+# 刷新缓存
+refresh_cache(){
+    amule-util -h | while read hash; do
+        add_into_cache "${hash}";
+    done
+}
+
+clear_expired_task(){
+	clear_lock=".clear_lock";
+	if [ -e ${clear_lock} ]; then
+		amlog "another clear task is already running.";
+		exit 1;
+	fi
+	
+	touch "${clear_clock}"
+    amule-util -h | while read hash; do
+        result=$(${redis_cmd} exists "${hash}" 2>/dev/null);
+        if [ ${result} -eq 0 ]; then
+            amlog "expired download task: ${hash}:${result}";
+            amule-task -c "${hash}";
+        fi
+    done
+
+	rm  "${clear_clock}";
+}
+
+# 从搜索结果中过滤掉非pdf和已经下载过的文件
+# TODO 过滤掉正在下载列表中的
+filter_results(){
+    rm "${ids_file}";
+    touch "${ids_file}";
+    amulecmd --command="results" | grep '.pdf$'| grep '^[0-9]\{1,5\}\,[0-9A-F]\{32\}' -o | while read line; do
+        tid=$(echo $line | grep '^[0-9]\{1,10\}' -o);
+        file_hash=$(echo $line | grep '[0-9A-F]\{32\}' -o);
+
+		amule-book -n ${file_hash} &>/dev/null;
+		if [ $? -eq 0 ]; then
+            add_into_cache "${file_hash}";
+            echo "$tid" >> ${ids_file};
+			amlog ">>>>>>>>>> NEW DOWNLOAD TASK FOUND: ${file_hash}";
+		fi
+    done
+}
+
+# search and download
+function auto(){
+    keyword=$(amule-key -k);
+    status=1;
+    time_counter=0;
+
+    amlog "NEW KEYWORD FOR SEARCH: ${keyword}"
+    amulecmd --command="search kad ${keyword}" &>/dev/null;
+
+    amlog "STARTING SEARCH TASK NOW...";
+    ts_start=$(date "+%Y%m%d%H%M%S");
+    while [ ${status} -ne 0 ]; do
+        amulecmd --command="progress" | grep 'not available' &>/dev/null;
+        status=$?;
+
+        if [ ${time_counter} -gt 30 ]; then
+            amlog "SEARCH TASK EXPIRED,RESTART: ${keyword}";
+            return;
+        fi
+
+        sleep 5;
+        let time_counter=time_counter+1;
+    done
+
+    item_count=$(amule-util -r);
+    amlog "SEARCH RESULT FOUND: ${item_count}";
+    ts_end=$(date "+%Y%m%d%H%M%S");
+    if [ ${item_count} -eq 0 ]; then
+        return;
+    fi
+
+    filter_results;
+
+    fcount=$(cat "${ids_file}" | wc -l) 
+    amlog "FILTERD IDS: $fcount";
+
+    task_count_before=$(amule-util -c);
+    addtask ${item_count} &>/dev/null;
+
+    task_count_after=$(amule-util -c);
+    ts_done=$(date "+%Y%m%d%H%M%S");
+    amlog "NEW DOWNLOAD TASK: ${task_count_before},${task_count_after}";
+
+    # TODO 日志维度. 关键字，开始时间，结束时间，搜索结果数，过滤结果数，完成时间
+    echo "search-log: ${keyword},${ts_start},${ts_end},${item_count},${fcount},${ts_done}";
+}
+
+search(){
+    if [ -e ".search.lock" ]; then
+        amlog "SEARCH TASK IS RUNNING!";
+        return;
+    fi
+    
+    total_task=$(amule-util -c);
+    if [ ${total_task} -gt ${AMB_TASK_CAPACITY} ]; then
+        amlog "MAX NUM OF DOWNLOAD TASK: ${total_task}/${AMB_TASK_CAPACITY}";
+        return;
+    fi
+
+    task_count=$(amule-util -R);
+    if [ ${task_count} -gt ${AMB_TASK_CONCURRENCY} ]; then
+        amlog "MAX NUM OF CONCURRENT DOWNLOAD TASK: ${task_count}/${AMB_TASK_CONCURRENCY}";
+        return;
+    fi
+
+    touch .search.lock
+    for i in {1..3}; do
+        auto;
+    done
+    rm .search.lock
+}
+
+basepath=$(cd `dirname $0`;pwd);
+cd ${basepath}
+source .ambotrc
+
+while getopts "scC" opt; do
+    case ${opt} in
+        c) { refresh_cache; exit;};;
+        C) { clear_expired_task; exit;};;
+        s) { search; exit; };;
+    esac
+done
+

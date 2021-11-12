@@ -1,0 +1,311 @@
+#!/bin/bash
+
+pngdir=/data/book/sync/png/
+pdfdir=/data/book/sync/pdf/
+
+export PATH=${PATH}:.:
+export PATH=${PATH}:/soft/bin:
+
+# retrieve page count 
+page_count(){
+    pc=$(gs -q -dNODISPLAY -c "($1) (r) file runpdfbegin pdfpagecount = quit" | tail -1 2>/dev/null);
+
+    if [ $? -eq 0 ]; then
+		echo ${pc}
+	else
+		echo -1
+	fi
+}
+
+# retrieve cover image
+pdf_cover(){
+	dgst=$(echo ${1} | md5sum | awk '{print $1}');
+	ts=$(date "+%s");
+	tmpname=${TMP_DIR}/${dgst}_${ts}.png;
+    
+	gs -dLastPage=1 \
+	   -dNOSAFER \
+	   -r300 \
+	   -dBATCH \
+	   -sDEVICE=png16m \
+	   -dNOPAUSE \
+	   -dEPSCrop \
+	   -sOutputFile=${tmpname} \
+	   "$1" 2>/dev/null 1>/dev/null;
+
+	if [ -e ${tmpname} ]; then
+		convert -resize 200 ${tmpname} ${2};
+		if [ $? -eq 0 ]; then
+			echo 0;
+		else
+			echo 1;
+		fi
+		rm ${tmpname};
+	else
+		echo 1;
+	fi
+}
+
+###############################################################################
+# 1. 用identify提取分辨率，计算总像素数。
+# 2. 使用convert提取直方图，计算过白/黑的像素总数.
+# 3. 评估图片黑白程度
+###############################################################################
+tag(){
+    statscript=$(cat <<\EOF
+	BEGIN {
+		darkc=0;
+		range=30;
+		black_range=range;
+		white_range=255-range;
+	}
+	{
+		if($5 >= white_range && $3 >= white_range && $4 >= white_range){
+			darkc+=$1;
+		}
+	}
+	END {
+		result=1;
+		ratio=darkc/tcolor;
+		if(ratio * 1000 > 700){
+			result=0;
+		}
+
+		printf("%d\n",result);
+	}
+EOF
+);
+
+    totalcolors=$(identify -format '%wx%h' ${1} | awk -Fx '{print $1*$2}');
+	# 评估图片黑白程度，-v用于向脚本传递参数
+    rst=$(convert ${1} -colors 256 -format "%c" histogram:info: | \
+            sed 'y/:()/,,,/' | \
+            awk -v tcolor=${totalcolors} -F, "${statscript}");
+
+    # 计算出的结果
+    echo "${rst}";
+}
+
+addisbn(){
+    batchcode="$1";
+    ldsql="select book_name from book where opstatus !='05' and batch_code=\"${batchcode}\"";
+
+    ${DB_CON} "${ldsql}" 2>/dev/null | while read bname
+    do
+        isbns=$(echo "${bname}" | grep '[0-9]\{10\}\|[0-9]\{13\}\|[0-9]\{9\}X\|[0-9]\{12\}X' -o);
+        if [ $? -eq 0 ]; then
+            isbn=$(echo "${isbns}" | head -1);
+            nname=$(echo "${bname}" | sed "s/${isbn}//g");
+            sql="update book set book_name=\"${nname}\",isbn=\"${isbn}\" where book_name=\"${bname}\"";
+            ${DB_CON} "${sql}" 2>/dev/null;
+        fi
+    done
+}
+
+addtime(){
+    batchcode="$1";
+    data=$(echo 20{00..21} 19{80..99});
+
+    for year in $data
+    do
+        fsql="select book_code from book where file_name like \"%${year}%\" and times is null and batch_code=\"${batchcode}\"";
+        ${DB_CON} "${fsql}" 2>/dev/null | while read bcode
+        do
+            ${DB_CON} "update book set times=\"${year}\" where book_code=\"${bcode}\"" 2>/dev/null;
+        done
+    done
+}
+
+trimname(){
+    batchcode="$1";
+    ldsql="select pk_book from book where batch_code=\"${batchcode}\"";
+
+    ${DB_CON} "${ldsql}" 2>/dev/null | while read bookid
+        do
+            fname=$(${DB_CON} "select book_name from book where pk_book=${bookid}" 2>/dev/null);
+            nfname=$(trim "${fname}");
+                
+            if [ $? -gt 0 ]; then
+                continue;
+            fi;
+
+            ${DB_CON} "update book set book_name=\"${nfname}\" where pk_book=${bookid}" 2>/dev/null;
+    done
+}
+
+triggertask(){
+    batchcode="$1";
+    sql="insert into bk_task(batch_code,ts,status) values(\"${batchcode}\",now(),'00')";
+    ${DB_CON} "${sql}" 2>/dev/null;
+}
+
+syncfiles(){
+	filecount=$(ls ${PDF_DIR} | wc -l);
+	if [ ${filecount} -gt 0 ]; then
+		mv -v ${PDF_DIR}/*.pdf ${SYNC_PDF_DIR} &>/dev/null;
+	else
+		amlog "no file to move."
+	fi
+}
+
+# check file in
+checkin(){
+    total_count=0;
+    succ_count=0;
+    succ_list=();
+	
+	v_lock_file=.archive.lock
+	if [ -e "${v_lock_file}" ]; then
+		amlog "an archive task is already running.";
+		return;
+	fi
+	
+	touch "${v_lock_file}";
+
+	filecount=$(ls ${RAW_DIR}/*.pdf 2>/dev/null | wc -l);
+	if [ ${filecount} -le 0 ]; then
+		rm "${v_lock_file}";
+		return;
+	fi
+
+	batch_code=$(date "+%Y%m%d%H%M%S");
+    for rawpdf in ${RAW_DIR}/*.pdf
+    do
+        ((total_count++));
+
+        rawpdf=$(basename "${rawpdf}");
+        amlog "processing: ${rawpdf}";
+
+		file_size=$(alcc "${RAW_DIR}/${rawpdf}" | awk -F\| '{print $4}');
+		filehash=$(alcc "${RAW_DIR}/${rawpdf}" | awk -F\| '{print $5}');
+
+        isnew=$(${DB_CON} "select is_new(\"${filehash}\")" 2>/dev/null);
+		if [ ${isnew} = 'NO' ]; then
+			amlog "An identical file has been checked in before.";
+            rm "${RAW_DIR}/${rawpdf}";
+			continue;
+		fi
+
+		fnlen=$(expr ${#rawpdf} - 4);
+		fname=${rawpdf:0:${fnlen}};
+
+		pgcount=$(page_count "${RAW_DIR}/${rawpdf}");
+		if [[ ! ${pgcount} =~ ^[0-9]+$ ]]; then
+			amlog "calculate page count failed";
+            rm "${RAW_DIR}/${rawpdf}";
+			continue;
+		fi
+
+		book_code=$(uuid);
+		pngname="${PNG_DIR}/${book_code}.png";
+		cret=$(pdf_cover "${RAW_DIR}/${rawpdf}" "${pngname}");
+		if [ "${cret}" -eq 1 ]; then
+            rm "${RAW_DIR}/${rawpdf}";
+			amlog "retrieve cover image failed!";
+		    continue;
+		fi
+
+        quality=$(tag ${pngname});
+        qtag=0
+        if (( ${pgcount} <= 10 || ${quality} == 0 || ${file_size} <= 1048576 )); then
+            qtag=1
+        fi
+
+		sql="insert into book(\
+			book_code,\
+			batch_code,\
+			book_name,\
+			file_name,\
+			file_size,\
+			page_count,\
+			cover_status,\
+			status,\
+			attribute,\
+			ts,\
+			hash,quality) values (\
+				\"${book_code}\",\
+				\"${batch_code}\",\
+				\"${fname}\",\
+				\"${rawpdf}\",\
+				${file_size},\
+				${pgcount},\
+				0,\
+				'NORMAL',\
+				'00',\
+				now(),\
+				\"${filehash}\",${qtag});";
+
+		${DB_CON} "${sql}" &>/dev/null;
+
+		if [ $? -eq 0 ]; then
+			mv "${RAW_DIR}/${rawpdf}" "${PDF_DIR}/${book_code}.pdf";
+		    mv "${pngname}" "/var/cover/"
+            ((succ_count++));
+		else
+			amlog "add database record failed."
+			rm "${pngname}"
+		fi
+
+        # keyword -s "${fname}";
+        succ_list[total_count]="${rawpdf}";
+	done
+
+    mailtext='';
+    idx=1
+    for fitem in "${succ_list[@]}"
+    do
+        mailtext="${mailtext}<br><strong>${idx}:&nbsp;</strong>${fitem}";
+        ((idx++))
+    done
+
+#    sendmail "${batch_code}" "${total_count}" "${succ_count}" "${mailtext}";
+
+	syncfiles;
+
+	addisbn "${batch_code}"
+	addtime "${batch_code}"
+	trimname "${batch_code}"
+	triggertask "${batch_code}"
+	
+	rm "${v_lock_file}";
+
+#	amlog "batch ${batch_code} checkin done!";
+#   amlog "success count: ${succ_count}";
+#   amlog "total count: ${total_count}";
+#
+	amlog "batch process done[${batch_code}]: ${succ_count}/${total_count}";
+}
+
+sync_info(){
+    fmt="%12s : %12s \n";
+    
+	file_today=$(${DB_CON} "select count(book_code) from book where date(ts)=date(now())" 2>/dev/null);
+    all_bookno=$(${DB_CON} "select count(book_code) from book where opstatus not in('04','05')" 2>/dev/null);
+    
+	disk=$(df -h | grep '/dev/vda1' | awk '{print $4}');
+	
+	printf "${fmt}" "disk free"   ${disk};
+	printf "${fmt}" "file today" ${file_today}
+	printf "${fmt}" "total file" ${all_bookno};
+}
+
+usage(){
+    echo "Usage: $0 [options [args]]";
+    echo "  -i show information";
+	echo "  -c checkin";
+}
+
+basedir=$(cd `dirname $0`;pwd);
+cd "${basedir}";
+
+source .ambotrc
+
+while getopts "cit" opt; do
+    case ${opt} in
+		c){ checkin; exit; };;
+		i){ sync_info; exit; };;
+	esac
+done
+
+usage;
+

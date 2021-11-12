@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# 查看搜索状态
+get_search_status(){
+    echo "hello";
+}
+
+# 查看搜索结果列表
+get_result_count(){
+    item_count=$(amulecmd --command="results" 2>/dev/null | tail -1 | grep '[0-9]\{1,10\}' -o);
+    echo "${item_count}";
+}
+
+
+# 查看下载任务HASH清单
+get_task_hash(){
+    amulecmd --command="show dl" | grep '[0-9A-F]\{32\}' -o
+}
+
+# 查看下载任务总数
+get_task_count(){
+    get_task_hash | wc -l;
+}
+
+# 查看运行中的任务总数
+get_running_task_count(){
+    amulecmd --command="show dl" \
+			| grep '^ >' \
+			| awk 'NR % 2== 0' \
+			| grep Downloading | wc -l
+}
+
+while getopts "chrR" opt; do
+    case ${opt} in
+        c) { get_task_count; exit; };;
+        h) { get_task_hash; exit; };;
+        r) { get_result_count; exit; };;
+        R) { get_running_task_count; exit; };;
+        i) { import_from_file "${OPTARG}"; exit; };;
+    esac
+done

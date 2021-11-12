@@ -1,0 +1,52 @@
+#!/bin/bash
+
+temp_dir='/soft/ambot/var/tmp/';
+dest_dir='/soft/ambot/var/raw/';
+local_dir="/soft/ambot/var/raw";
+dest_rep='wangzh@data.warmcode.net';
+
+move_batch_to_repository(){
+    batch_count=5;
+    target_type="*.pdf";
+
+    ls -rS ${local_dir}/${target_type} 2>/dev/null | head -${batch_count} | while read file
+    do
+		echo "${file}"
+        scp -P 2299 "${file}" "${dest_rep}:${temp_dir}"
+        if [ $? -eq 0 ]; then
+            rm "${file}";
+        fi
+    done
+
+    ssh -p 2299 ${dest_rep} "mv -v ${temp_dir}*.pdf ${dest_dir}";
+}
+
+move_to_repository(){
+    target_type="*.pdf";
+
+    count=$(ls -rS ${local_dir}/${target_type} 2>/dev/null | wc -l);
+    if [ ${count} -le 0 ]; then
+        echo "No file to be synchronized.";
+        return;
+    fi
+
+    while [ ${count} -gt 0 ]; do
+        echo "${count} files to move.";
+        move_batch_to_repository;
+        count=$(ls -rS ${local_dir}/${target_type} 2>/dev/null | wc -l);
+    done
+}
+
+main(){
+    sync_lock='/soft/ambot/bin/.sync.lock';
+    if [ -e "${sync_lock}" ]; then
+        echo "another task is running.";
+        exit 1;
+    fi
+
+    touch "${sync_lock}";
+    move_to_repository;
+    rm "${sync_lock}";
+}
+
+main;

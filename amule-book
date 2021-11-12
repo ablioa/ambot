@@ -1,0 +1,181 @@
+#!/bin/bash
+
+config_file=".ambotrc";
+
+clean_token(){
+	sql="update book set book_name=replace(book_name,\"$1\",\"\")";
+	mysql -uroot -pHgx@1234 bookdb -s -e "${sql}" 2>/dev/null;
+}
+
+# 根据文件名识别非英文电子杂志类型
+cmag(){
+	mlist="gennaio\|febbraio\|marzo\|aprile\|maggio\|Giugno\|luglio\|agosto\|settembre\|ottombre\|novembre\|dicembre";
+	mlist="${mlist}\|enero\|febrero\|marzo\|abril\|mayo\|junio\|julio\|agosto\|septiembre\|octubre\|noviembre\|diciembre";
+	mlist="${mlist}\|Janvier\|Février\|Mars\|Avril\|Mai\|Juin\|Juillet\|Août\|Septembre\|Octobre\|Novembre\|Décembre"
+	mlist="${mlist}\|Januar\|Februar\|März\|Mai\|Juni\|Juli\|Oktober\|Dezember"
+
+	today="2019-08-01"
+	echo "mlist:${mlist}"
+	ldsql="select book_name from book where opstatus !='05' and date(ts) >= '${today}'";
+	${mysql_cmd} "${ldsql}" 2>/dev/null | while read bname
+	do
+		ismag=0
+		echo "${bname}" | grep -i -w "${mlist}" 1>/dev/null 2>/dev/null;
+		if [ $? -eq 0 ]; then
+			echo "${bname}" | grep -w "20[0-2][0-9]" 2>/dev/null 1>/dev/null;
+			if [ $? -eq 0 ]; then
+				ismag=1;
+			fi
+		fi
+
+		if [ ${ismag} -eq 1 ]; then
+			echo "YES: ${bname}"
+		fi
+	done
+}
+
+
+# 移除文件名中的空格
+ftrim(){
+    export PATH=${PATH}:/soft/bin:
+	pgoffset=$1
+	if [[ $# -eq 0 ]]; then
+	   pgoffset=0
+	fi
+
+	ldsql="select pk_book from book where opstatus!='05' \
+		   order by book_name \
+		   limit ${pgoffset},20";
+
+	${mysql_cmd} "${ldsql}" 2>/dev/null | while read bookid
+	do
+		fname=$(${mysql_cmd} "select book_name from book where pk_book=${bookid}" 2>/dev/null);
+		nfname=$(trim "${fname}");
+		
+		if [ $? -gt 0 ]; then
+			continue;
+		fi
+
+		echo "FILE: |${fname}|${nfname}|";	
+		${mysql_cmd} "update book set book_name=\"${nfname}\" where pk_book=${bookid}" 2>/dev/null;
+	done
+}
+
+# 从文件命中提取出版社信息
+retrieve_publisher_info(){
+	if [ $# -eq 0 ]; then
+		exit 1;
+	fi
+
+	keyitem=$1
+
+	echo "TRYING TO UPDATE DATABASE NOW! CONFIRM?(no) [yes/no]"
+	echo "keyword: ${keyitem}";
+	read confirm
+
+	if [ -z ${confirm} ]; then
+	   confirm=no
+	fi
+
+	echo "confirm information: ${confirm}";
+
+	echo "key item: |${keyitem}|"
+	if [ ${confirm} == "yes" ]; then
+		${mysql_cmd} "select pk_book from book where opstatus not in('04','05') and book_name like \"%${keyitem}%\" order by book_name limit 1000" 2>/dev/null | while read bookid
+		do
+			fname=$(${mysql_cmd} "select book_name from book where pk_book=${bookid}" 2>/dev/null);
+			nfname=$(echo "${fname}" | sed "s/${keyitem}//g");
+			echo "file to handle:|${fname}|${nfname}|";
+		
+			${mysql_cmd} "update book set book_name=\"${nfname}\",publisher=\"${keyitem}\" where pk_book=${bookid}" 2>/dev/null;
+		done
+	fi
+}
+
+# 检查是否杂志
+is_magzine(){
+	mlist="january\|february\|march\|april\|may\|june\|july\|august\|september\|october\|november\|december";
+
+	today="2019-08-01"
+	ldsql="select book_name from book where opstatus !='05' and attribute='00' and date(ts) >= '${today}'";
+
+	${mysql_cmd} "${ldsql}" 2>/dev/null | while read bname
+	do
+		ismag=0
+		echo "${bname}" | grep -i "${mlist}" 1>/dev/null 2>/dev/null;
+
+		if [ $? -eq 0 ]; then
+			echo "${bname}" | grep "20[0-2][0-9]" 2>/dev/null 1>/dev/null;
+			if [ $? -eq 0 ]; then
+				ismag=1;
+			fi
+		fi
+
+		echo "${bname}" | grep "20[0-2][0-9][\.\-_][0-1][0-9]" 2>/dev/null 1>/dev/null;
+		if [ $? -eq 0 ]; then
+			ismag=1
+		fi
+
+		if [ ${ismag} -eq 1 ]; then
+			sql="update book set attribute='02' where book_name=\"${bname}\"";
+			${mysql_cmd} "${sql}" 2>/dev/null;
+
+			echo "magzine: ${bname}";
+		fi
+	done
+}
+
+usage(){
+    echo "ambot utilities";
+	echo "Usage: utils command [param]";
+	echo "选项:";
+	echo "  -t             删除文档中的空白字符，字符定义参考trim.";
+	echo "  -c             清空文件命中指定的字符串。";
+	echo "  -l file        设置中文语言，file是代码清单文件。"
+	echo "  -p publisher   提取出版社信息"
+}
+
+
+get_count(){
+   ${mysql_cmd} "select count(*) from book" 2>/dev/null;
+}
+
+exists(){
+    hash=$1
+    sql="select count(book_code) from book where hash=\"${hash}\"";
+    count=$(${mysql_cmd} "${sql}");
+    if [ $count -eq 0 ]; then
+        exit 0;
+    fi
+
+    exit 1;
+}
+
+# init working environment
+init_env(){
+	binpath=$(dirname $0);
+    basedir=$(cd ${binpath};pwd);
+    cd "${basedir}";
+
+	if [ ! -e ${config_file} ]; then
+        # TODO display in color
+		echo "config file [${config_file}] not exist.";
+		exit 2;
+	fi
+
+	. "${config_file}"
+}
+
+init_env;
+
+while getopts "n:t:c:p:" opts; do
+    case  ${opts} in
+	    n ){ exists "${OPTARG}";};;
+	    p ){ retrieve_publisher_info "${OPTARG}";};;
+        t ){ ftrim "${OPTARG}";};;
+        c ){ clean_token "${OPTARG}";};;
+        l ){ set_lang; exit;};;
+        d ){ disable_keyword "${OPTARG}"; exit;};;
+        h ){ usage; exit; };;
+    esac;
+done;

@@ -1,0 +1,151 @@
+#!/bin/bash
+
+export BIG_TASK_LIMIT=20
+
+amule_temp_dir="/soft/ambot/var/temp/"
+
+amlexec(){
+    amulecmd -P ${AML_PASSWORD} --command="${1}" 2>/dev/null;
+}
+
+# display bigest tasks.
+show_big_task(){
+	file=$(ls -lS ${amule_temp_dir} | head -"${BIG_TASK_LIMIT}" | awk '{print $9,$5}')
+
+	IFD=$IFS
+	IFS=$'\n'
+
+	index=1
+	for f in ${file[@]}
+	do   
+		tuples=(${f// /${IFS}})
+		if [ ${#tuples[@]} -ne 2 ]; then
+			continue;
+		fi
+
+		fname=${tuples[0]};
+		fsize=${tuples[1]};
+		tname=$(amulecmd --command="show dl" | grep -w ${fname} -B 1 | head -1)
+		tid=$(echo ${tname} | grep '[0-9A-F]\{32\}' -o)
+		tname=$(echo ${tname} | sed 's/[0-9A-F]\{32\}//g' | sed 's/>//g' | sed 's/^[ ]*//g')
+
+		printf "%03d: %10d %s %s %s\n" ${index} ${fsize} ${tid} ${fname} ${tname};
+
+		((index++))
+	done
+	IFS=$IFD
+}
+
+# cancel download tasks, $1 is the task code
+cancel_task(){
+	task_code="${1}";
+    amulecmd --command="cancel ${task_code}" &>/dev/null;
+	amlog "task [${task_code}] canceled";
+}
+
+# check service status
+service_check(){
+    netstat -l 2>/dev/null | grep "${AML_SERVICE_ID}" &>/dev/null;
+    if [ $? -gt 0 ]; then
+        amlog "amule service is down,restarting service now!";
+        amuled -f
+	else
+		amlog "service is already running now!";
+    fi
+}
+
+# 移除过期的任务
+clean_task(){
+    amlexec "${AML_DLIST}" | grep '[0-9A-F]\{32\}' -o | while read item
+	do
+        expired=$(${mysql_cmd} "select is_expired(\"${nodeno}\",\"${item}\")" 2>/dev/null);
+        if [[ ${expired} == 'YES' ]]; then
+            amlog "removing task: ${item}";
+            amlexec "cancel ${item}" &>/dev/null;
+        fi
+    done
+}
+
+# clear zombie processes
+kill_zombie(){
+	zids=$(ps -aux| grep defunct | grep grep -v | awk '{print $2}'| while read line; do echo ${line};done);
+	for zid in ${zids}; do
+		zpid=$(ps -ef | grep ${zid} | grep grep -v | awk '{print $3}');
+		printf "zombie:%6d,pid:%6d\n" ${zid} ${zpid}
+		kill -9 ${zpid}
+	done
+}
+
+# show runnning status
+show_task_info(){
+    total=$(amlexec "${AML_DLIST}" | \
+            awk 'NR > 4 && NR % 2 ==1 {print NR,$0}' | \
+            wc -l);
+    
+	downloading=$(amlexec "${AML_DLIST}" | \
+            awk 'NR > 4 && NR % 2 ==0 {print NR,$0}' | \
+            grep Downloading | \
+            wc -l);
+
+	notstart=$(amlexec "${AML_DLIST}" | \
+            awk 'NR > 4 && NR % 2 ==0 {print NR,$0}' | \
+            grep '\[0.0%\]' | \
+            wc -l);
+
+    downspeed=$(amlexec "${AML_STATUS}" | grep "Download" | awk '{print $3,$4}');
+
+    upspeed=$(amlexec "${AML_STATUS}" | grep "Upload" | awk '{print $3,$4}');
+
+    printf "%15s: %d\n" "total task" ${total};
+    printf "%15s: %d\n" "downloading" ${downloading};
+    printf "%15s: %d\n" "no started" ${notstart};
+    printf "%15s: %s\n" "download speed" "${downspeed}";
+    printf "%15s: %s\n" "upload speed" "${upspeed}";
+}
+
+
+remove(){
+    if [ -z ${1} ]; then
+        return;
+    fi;
+
+    tasklist=$(amlexec "${AML_DLIST}" | \
+        grep "${1}" | \
+        grep -o '[0-9A-F]\{32\}');
+
+    for task in ${tasklist}
+    do
+        amlog "removing task: ${task}";
+        amlexec "cancel ${task}" &>/dev/null;
+    done
+}
+
+usage(){
+    echo "Usage: $0 [options]";
+	echo "  -i 查看下载详情";
+	echo "  -k kill system zombie processes";
+	echo "  -r 移除符合条件的下载任务，模糊搜索.";
+	echo "  -t show big tasks";
+	echo "  -s check service status";
+	echo "  -c cancel tasks";
+	echo "  -C clean expired task";
+}
+
+basepath=$(cd `dirname $0`;pwd);
+cd ${basepath}
+source ./.ambotrc
+
+while getopts "ikrstc:C" opt; do
+    case ${opt} in
+		c) { code=${OPTARG}; cancel_task "${code}"; exit;};;
+	    C) { clean_task; exit;};;
+	    i) { show_task_info; exit;};;
+		k) { kill_zombie; exit;};;
+		r) { shift;remove "${OPTARG}"; exit;};;
+		s) { service_check; exit;};;
+		t) { show_big_task; exit;};;
+	esac
+done
+
+usage;
+

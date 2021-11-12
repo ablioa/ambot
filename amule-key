@@ -1,0 +1,99 @@
+#!/bin/bash
+
+#redis_key_cmd="redis-cli -h warmcode.net -p 6380 -a abc123 -n 1"
+#kelp_cursor='kelp:cursor';
+#kelp_store='kelp:store';
+
+export PATH=${PATH}:/soft/redis/bin:
+config_file=".ambotrc";
+
+get_store_cursor(){
+    ${redis_key_cmd} get "${kelp_cursor}" 2>/dev/null;
+}
+
+update_store_cursor(){
+    new_value=$1;
+    ${redis_key_cmd} set "${kelp_cursor}" "${new_value}" &>/dev/null;
+}
+
+get_store_capacity(){
+   ${redis_key_cmd} llen "${kelp_store}" 2>/dev/null; 
+}
+
+add_item_to_store(){
+    item="$1";
+    ${redis_key_cmd} rpush "${kelp_store}" "${item}" &>/dev/null;
+}
+
+get_item_from_store(){
+    index="$1";
+    result=$(${redis_key_cmd} lrange "${kelp_store}" "${index}" "${index}" 2>/dev/null);
+    echo "$result"
+}
+
+get_next_keyword(){
+    llen=$(get_store_capacity);
+    rcur=$(get_store_cursor);
+	
+    icur=$rcur;
+    if [ $icur -ge $llen ]; then
+        icur=$((${icur} % ${llen}));
+    fi
+
+    result=$(get_item_from_store $icur);
+    let icur=$icur+1;
+    update_store_cursor $icur;
+
+    echo ${result};
+}
+
+init_kelp_store(){
+    for item in {0..9}; do
+        echo "item: ${item}"
+        add_item_to_store "keyword-${item}";
+      done
+}
+
+reset_store(){
+    ${redis_key_cmd} ltrim "${kelp_store}" 1 0 &>/dev/null;
+}
+
+import_from_file(){
+    list_file="$1";
+    reset_store;
+    cat "${list_file}" | while read keyword
+    do
+        add_item_to_store "${keyword}";
+    done
+}
+
+show_items(){
+    total=$(${redis_key_cmd} llen "${kelp_store}" 2>/dev/null);
+    ${redis_key_cmd} lrange  "${kelp_store}" 0 ${total} 2>/dev/null;
+}
+
+# init working environment
+init_env(){
+	binpath=$(dirname $0);
+    basedir=$(cd ${binpath};pwd);
+    cd "${basedir}";
+
+	if [ ! -e ${config_file} ]; then
+        # TODO display in color
+		echo "config file [${config_file}] not exist.";
+		exit 2;
+	fi
+
+	. "${config_file}"
+}
+
+init_env;
+
+while getopts "lhki:" opt; do
+    case ${opt} in
+        l) { show_items; exit; };;
+        h) { echo "help info"; exit; };;
+        k) { get_next_keyword; exit; };;
+        i) { import_from_file "${OPTARG}"; exit; };;
+    esac
+done

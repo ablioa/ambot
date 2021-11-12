@@ -1,0 +1,17 @@
+#!/usr/bin/expect
+
+set timeout 20
+spawn amulecmd
+expect "aMulecmd$"
+
+send "results\r"
+
+set fid [open ids r]
+while {[gets $fid line] >= 0} {
+	send "download $line\r"
+    puts "adding: $line"
+}
+
+send "exit\r"
+expect eof
+
