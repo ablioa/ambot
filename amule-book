@@ -4,10 +4,10 @@ config_file=".ambotrc";
 
 clean_token(){
 	sql="update book set book_name=replace(book_name,\"$1\",\"\")";
-	mysql -uroot -pHgx@1234 bookdb -s -e "${sql}" 2>/dev/null;
+	${mysql_cmd} "${sql}" 2>/dev/null;
 }
 
-# 根据文件名识别非英文电子杂志类型
+# detect magazine via filename.
 cmag(){
 	mlist="gennaio\|febbraio\|marzo\|aprile\|maggio\|Giugno\|luglio\|agosto\|settembre\|ottombre\|novembre\|dicembre";
 	mlist="${mlist}\|enero\|febrero\|marzo\|abril\|mayo\|junio\|julio\|agosto\|septiembre\|octubre\|noviembre\|diciembre";
@@ -35,7 +35,7 @@ cmag(){
 }
 
 
-# 移除文件名中的空格
+# remove spaces from filenames.
 ftrim(){
     export PATH=${PATH}:/soft/bin:
 	pgoffset=$1
@@ -61,7 +61,7 @@ ftrim(){
 	done
 }
 
-# 从文件命中提取出版社信息
+# retrieve publisher information from filename.
 retrieve_publisher_info(){
 	if [ $# -eq 0 ]; then
 		exit 1;
@@ -92,7 +92,7 @@ retrieve_publisher_info(){
 	fi
 }
 
-# 检查是否杂志
+# identify magazine from filename.
 is_magzine(){
 	mlist="january\|february\|march\|april\|may\|june\|july\|august\|september\|october\|november\|december";
 
@@ -125,17 +125,6 @@ is_magzine(){
 	done
 }
 
-usage(){
-    echo "ambot utilities";
-	echo "Usage: utils command [param]";
-	echo "选项:";
-	echo "  -t             删除文档中的空白字符，字符定义参考trim.";
-	echo "  -c             清空文件命中指定的字符串。";
-	echo "  -l file        设置中文语言，file是代码清单文件。"
-	echo "  -p publisher   提取出版社信息"
-}
-
-
 get_count(){
    ${mysql_cmd} "select count(*) from book" 2>/dev/null;
 }
@@ -143,7 +132,7 @@ get_count(){
 exists(){
     hash=$1
     sql="select count(book_code) from book where hash=\"${hash}\"";
-    count=$(${mysql_cmd} "${sql}");
+    count=$(${mysql_cmd} "${sql}" 2>/dev/null);
     if [ $count -eq 0 ]; then
         exit 0;
     fi
@@ -166,16 +155,95 @@ init_env(){
 	. "${config_file}"
 }
 
+rename_from_last_version(){
+	filelist="$1";
+	if [ ! -e ${filelist} ]; then
+		amlog "file list [${filelist}] not exist.";
+	    return;
+	fi
+
+    amlog "rename from last version: ${filelist}";
+	cat "${filelist}" | while read book_code; do
+	    book_name=$($mysql_cmd "select book_name from book where book_code=\"${book_code}\"" 2>/dev/null);
+		${mysql_cmd} "update book set book_name=\"${book_name}\" where book_name=\"${book_code}\"" 2>/dev/null;
+
+		amlog "book-name updated: ${book_code},${book_name}";
+	done
+}
+
+count_magazine(){
+    amlog "counting the number of magazine now!";
+	${mysql_cmd} "select magazine_name from magazine_meta" | while read mag; do
+		countsql="select count(*) from book \
+		    where \
+			    book_name like \"%${mag}%\" \
+			and attribute='02' \
+			and opstatus!='05'";
+
+	    mcount=$(${mysql_cmd} "${countsql}" 2>/dev/null);
+		amlog "counting: ${mag} , ${mcount}";
+
+		setsql="update magazine_meta set effective_count=${mcount} where magazine_name=\"${mag}\""
+		${mysql_cmd} "${setsql}" 2>/dev/null;
+	done
+}
+
+# retrieve duplicated magazine
+duplicate_magazine(){
+	magcode=$1;
+
+	mgsql="select magazine_name from magazine_meta where magazine_code=\"${magcode}\"";
+	magname=$(${mysql_cmd} "${mgsql}" 2>/dev/null);
+	if [ -z "${magname}" ]; then
+		amlog "Magazine : ${magcode} not exist.";
+	    return;
+	fi
+
+	amlog "magazine name: ${magname}";
+	gsql="select concat(b.book_name,'|',b.book_code,'|',b.book_name,'_',b.pk_book,'.pdf') \
+		  from \
+		      book  b,\
+		      (select book_name,count(book_name) ss from  book \
+			       where \
+				   book_name like \"${magname}%\" \
+				   group by book_name having ss > 1\
+			  ) p \
+		  where \
+		      b.book_name = p.book_name";
+
+	${mysql_cmd} "${gsql}" 2>/dev/null | while read ditem; do
+		addsql="insert into bag(add_time,bag_status,book_code,status,ts,group_path) \
+		values (now(),10,'',0,now(),\"${ditem}\");";
+
+	    ${mysql_cmd} "${addsql}" 2>/dev/null;
+	done
+}
+
+usage(){
+    echo "ambot-book utilities";
+	echo "Usage: $0 [param]";
+	echo "  -c token       remove redundant content from book name.";
+	echo "  -d magcode     retrieve duplicated magazine in groups.";
+	echo "  -h             show usage message.";
+	echo "  -m             calculate magazine count in groups.";
+	echo "  -n hash        check whether a book hash exists.";
+	echo "  -p name        retrieve publiher name from file name.";
+	echo "  -r code-list   update book name from original version when hash changed.";
+	echo "  -t [offset]    trim book name.";
+}
+
 init_env;
 
-while getopts "n:t:c:p:" opts; do
+while getopts "c:d:D:hlmn:p:r:t:" opts; do
     case  ${opts} in
+        c ){ clean_token "${OPTARG}";};;
+	    d ){ duplicate_magazine "${OPTARG}";};;
+        h ){ usage; exit; };;
+	    m ){ count_magazine;};;
 	    n ){ exists "${OPTARG}";};;
 	    p ){ retrieve_publisher_info "${OPTARG}";};;
+		r ){ rename_from_last_version "${OPTARG}"; exit;};;
         t ){ ftrim "${OPTARG}";};;
-        c ){ clean_token "${OPTARG}";};;
-        l ){ set_lang; exit;};;
-        d ){ disable_keyword "${OPTARG}"; exit;};;
-        h ){ usage; exit; };;
     esac;
 done;
+
