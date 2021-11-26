@@ -54,7 +54,7 @@ service_check(){
     fi
 }
 
-# 移除过期的任务
+# remove expired task
 clean_task(){
     amlexec "${AML_DLIST}" | grep '[0-9A-F]\{32\}' -o | while read item
 	do
@@ -120,15 +120,34 @@ remove(){
     done
 }
 
+# kill task that runs for too long.
+kill_slow_task(){
+    idflag='gs -dLastPage';
+	max_life_span=1200
+
+	pid=$(ps -aux | grep "${idflag}" | grep grep -v | awk '{print $2}');
+	if [ -z ${pid} ]; then
+		return;
+	fi
+
+	lifespan=$(ps -eo pid,etimes | grep "${pid}" | awk '{print $2}');
+	echo "life-span: $lifespan";
+	if [ ${lifespan} -gt ${max_life_span} ]; then
+	    echo "task expired: ${pid}";
+	    kill -9 ${pid}
+	fi
+}
+
 usage(){
     echo "Usage: $0 [options]";
-	echo "  -i 查看下载详情";
+	echo "  -i show download detailed information.";
 	echo "  -k kill system zombie processes";
-	echo "  -r 移除符合条件的下载任务，模糊搜索.";
+	echo "  -r remove task that has a name matches some pattern.";
 	echo "  -t show big tasks";
 	echo "  -s check service status";
 	echo "  -c cancel tasks";
 	echo "  -C clean expired task";
+	echo "  -l kill slow task"
 }
 
 basepath=$(cd `dirname $0`;pwd);
@@ -141,6 +160,7 @@ while getopts "ikrstc:C" opt; do
 	    C) { clean_task; exit;};;
 	    i) { show_task_info; exit;};;
 		k) { kill_zombie; exit;};;
+		l) { kill_slow_task; exit;};;
 		r) { shift;remove "${OPTARG}"; exit;};;
 		s) { service_check; exit;};;
 		t) { show_big_task; exit;};;
