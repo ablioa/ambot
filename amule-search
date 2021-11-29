@@ -31,7 +31,7 @@ clear_expired_task(){
 		exit 1;
 	fi
 	
-	touch "${clear_clock}"
+	touch "${clear_lock}"
     amule-util -h | while read hash; do
         result=$(${redis_cmd} exists "${hash}" 2>/dev/null);
         if [ ${result} -eq 0 ]; then
@@ -40,7 +40,7 @@ clear_expired_task(){
         fi
     done
 
-	rm  "${clear_clock}";
+	rm  "${clear_lock}";
 }
 
 # 从搜索结果中过滤掉非pdf和已经下载过的文件
