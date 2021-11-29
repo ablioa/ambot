@@ -147,12 +147,11 @@ init_env(){
     cd "${basedir}";
 
 	if [ ! -e ${config_file} ]; then
-        # TODO display in color
 		echo "config file [${config_file}] not exist.";
 		exit 2;
 	fi
 
-	. "${config_file}"
+	. "./${config_file}"
 }
 
 rename_from_last_version(){

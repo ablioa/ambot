@@ -1,0 +1,60 @@
+export PATH=${PATH}:./bin:
+
+. .ambot.conf
+
+# application directories
+pngdir=/data/book/sync/png/
+pdfdir=/data/book/sync/pdf/
+
+RAW_DIR=/soft/ambot/var/raw
+PDF_DIR=/soft/ambot/var/pdf
+PNG_DIR=/soft/ambot/var/png
+ERR_DIR=/soft/ambot/var/err
+TMP_DIR=/soft/ambot/var/tmp
+DLD_DIR=/soft/ambot/var/raw
+
+SYNC_PDF_DIR=/data/res/in/
+
+mysql_cmd="mysql -u${MYSQL_USER} \
+		   -p${MYSQL_PASSWORD} \
+		   -h ${MYSQL_HOST} \
+		   ${MYSQL_DATABASE} -s -e"
+
+redis_cmd="redis-cli -a ${REDIS_PASSWORD} \
+		   -h ${REDIS_HOST} \
+		   -p ${REDIS_PORT} \
+		   -n 2"
+
+redis_ttl_cmd="redis-cli -a ${REDIS_PASSWORD} \
+		   -h ${REDIS_HOST} \
+		   -p ${REDIS_PORT} \
+		   -n 2"
+
+redis_key_cmd="redis-cli -a ${REDIS_PASSWORD} \
+		   -h ${REDIS_HOST} \
+		   -p ${REDIS_PORT} \
+		   -n 1"
+
+# amule commands
+AML_DLIST="show dl";
+AML_CANCEL="cancel ";
+AML_RESULT="results";
+AML_PROGRESS="progress";
+AML_SEARCH_KAD="search kad ";
+AML_SEARCH_GLB="search globle ";
+AML_SEARCH_LCL="search local ";
+AML_STATUS="status"
+
+# ambot configuration
+AMB_TASK_CAPACITY=2000
+AMB_TASK_CONCURRENCY=30
+
+nodeno=ambot_00
+concurrency=25
+
+# log function
+amlog(){
+    ts=$(date "+%Y-%m-%d %H:%M:%S");
+    echo ${ts} ${1}
+}
+
