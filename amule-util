@@ -30,6 +30,29 @@ get_running_task_count(){
 			| grep Downloading | wc -l
 }
 
+# 根据指定的文件摘要,判定下载目录raw中是否包含已经存在的文件,有则移动到备份目录
+diff_directory(){
+    if [ ! -e dg.txt ]; then
+      echo "文件摘要数据(./dg.txt)不存在.";
+      exit 1;
+    fi
+
+    ls var/raw | while read file; do
+        sum=$(md5sum "var/raw/${file}" | awk '{print $1}');
+
+        grep "${sum}" dg.txt &>/dev/null;
+        if [ $? -eq 0 ]; then
+          echo "文件已经存在: ${file}";
+          mv -v -- "var/raw/${file}" backups/
+          continue;
+        else
+          echo "文件不存在";
+        fi
+ 
+        echo "FILE: ${sum} ${file}";
+    done
+}
+
 while getopts "chrR" opt; do
     case ${opt} in
         c) { get_task_count; exit; };;
