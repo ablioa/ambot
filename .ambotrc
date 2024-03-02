@@ -1,5 +1,7 @@
 export PATH=${PATH}:./bin:
 export PATH=${PATH}:/soft/redis/bin:
+export PATH=${PATH}:.:
+export PATH=${PATH}:/soft/bin:
 
 # 配置文件在其中定义MySQL,redis的数据访问信息
 . .ambot.conf

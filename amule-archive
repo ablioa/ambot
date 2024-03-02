@@ -1,12 +1,6 @@
 #!/bin/bash
 
-pngdir=/data/book/sync/png/
-pdfdir=/data/book/sync/pdf/
-
-export PATH=${PATH}:.:
-export PATH=${PATH}:/soft/bin:
-
-# retrieve page count 
+# 计算pdf文件的页数 
 page_count(){
     pc=$(gs -q -dNODISPLAY -c "($1) (r) file runpdfbegin pdfpagecount = quit" | tail -1 2>/dev/null);
 
@@ -17,7 +11,7 @@ page_count(){
 	fi
 }
 
-# retrieve cover image
+# 提取pdf文件封面
 pdf_cover(){
 	dgst=$(echo ${1} | md5sum | awk '{print $1}');
 	ts=$(date "+%s");
@@ -86,6 +80,7 @@ EOF
     echo "${rst}";
 }
 
+# 提取pdf文件的ISBN号
 addisbn(){
     batchcode="$1";
     ldsql="select book_name from book where opstatus !='05' and batch_code=\"${batchcode}\"";
@@ -102,9 +97,10 @@ addisbn(){
     done
 }
 
+# 提取文件生成时间
 addtime(){
     batchcode="$1";
-    data=$(echo 20{00..21} 19{80..99});
+    data=$(echo 20{00..30} 19{80..99});
 
     for year in $data
     do
@@ -116,6 +112,7 @@ addtime(){
     done
 }
 
+# 清空文件命中无效自负
 trimname(){
     batchcode="$1";
     ldsql="select pk_book from book where batch_code=\"${batchcode}\"";
@@ -140,15 +137,15 @@ triggertask(){
 }
 
 syncfiles(){
-	filecount=$(ls ${PDF_DIR} | wc -l);
-	if [ ${filecount} -gt 0 ]; then
-		mv -v ${PDF_DIR}/*.pdf ${SYNC_PDF_DIR} &>/dev/null;
-	else
-		amlog "no file to move."
-	fi
+	  filecount=$(ls ${PDF_DIR} | wc -l);
+	  if [ ${filecount} -gt 0 ]; then
+	  	mv -v ${PDF_DIR}/*.pdf ${SYNC_PDF_DIR} &>/dev/null;
+	  else
+	  	amlog "no file to move."
+	  fi
 }
 
-# check file in
+# 生成文件描述记录,插入到数据库中.
 checkin(){
     total_count=0;
     succ_count=0;
@@ -222,7 +219,7 @@ checkin(){
 			status,\
 			attribute,\
 			ts,\
-			hash,quality) values (\
+			hash,quality,formal,deprecated) values (\
 				\"${book_code}\",\
 				\"${batch_code}\",\
 				\"${fname}\",\
@@ -233,7 +230,7 @@ checkin(){
 				'NORMAL',\
 				'00',\
 				now(),\
-				\"${filehash}\",${qtag});";
+				\"${filehash}\",${qtag},0,0);";
 
 		${DB_CON} "${sql}" &>/dev/null;
 
@@ -258,7 +255,7 @@ checkin(){
         ((idx++))
     done
 
-#    sendmail "${batch_code}" "${total_count}" "${succ_count}" "${mailtext}";
+#sendmail "${batch_code}" "${total_count}" "${succ_count}" "${mailtext}";
 
 	syncfiles;
 
@@ -277,7 +274,7 @@ checkin(){
 }
 
 sync_info(){
-    fmt="%12s : %12s \n";
+  fmt="%12s : %12s \n";
     
 	file_today=$(${DB_CON} "select count(book_code) from book where date(ts)=date(now())" 2>/dev/null);
     all_bookno=$(${DB_CON} "select count(book_code) from book where opstatus not in('04','05')" 2>/dev/null);
@@ -292,7 +289,7 @@ sync_info(){
 usage(){
     echo "Usage: $0 [options [args]]";
     echo "  -i show information";
-	echo "  -c checkin";
+	  echo "  -c checkin";
 }
 
 basedir=$(cd `dirname $0`;pwd);
