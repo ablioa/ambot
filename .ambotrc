@@ -1,5 +1,7 @@
 export PATH=${PATH}:./bin:
+export PATH=${PATH}:/soft/redis/bin:
 
+# 配置文件在其中定义MySQL,redis的数据访问信息
 . .ambot.conf
 
 # application directories
@@ -15,27 +17,41 @@ DLD_DIR=/soft/ambot/var/raw
 
 SYNC_PDF_DIR=/data/res/in/
 
+# 记录下载任务号的临时文件
+ids_file="ids";
+
+# 下载任务寿命常量,秒数换算为对应的小时数
+ttl_72_hours=295200
+ttl_48_hours=172800
+ttl_36_hours=129600
+ttl_24_hours=86400
+ttl_12_hours=43200
+
+# 数据库访问操作指令
 mysql_cmd="mysql -u${MYSQL_USER} \
 		   -p${MYSQL_PASSWORD} \
 		   -h ${MYSQL_HOST} \
 		   ${MYSQL_DATABASE} -s -e"
 
+# redis 操作指令
 redis_cmd="redis-cli -a ${REDIS_PASSWORD} \
 		   -h ${REDIS_HOST} \
 		   -p ${REDIS_PORT} \
 		   -n 2"
 
+# 任务TTL操作指令
 redis_ttl_cmd="redis-cli -a ${REDIS_PASSWORD} \
 		   -h ${REDIS_HOST} \
 		   -p ${REDIS_PORT} \
 		   -n 2"
 
+# 任务关键字操作指令
 redis_key_cmd="redis-cli -a ${REDIS_PASSWORD} \
 		   -h ${REDIS_HOST} \
 		   -p ${REDIS_PORT} \
 		   -n 1"
 
-# amule commands
+# amule命令,参考amuldcmd命令帮助文档
 AML_DLIST="show dl";
 AML_CANCEL="cancel ";
 AML_RESULT="results";
@@ -45,14 +61,19 @@ AML_SEARCH_GLB="search globle ";
 AML_SEARCH_LCL="search local ";
 AML_STATUS="status"
 
-# ambot configuration
+# 最大下载任务数,下载列表中的任务数超过这个数量即暂停搜索
 AMB_TASK_CAPACITY=2000
+
+# 最大并发下载,进行中的下载任务数超过这个数量即暂停搜索
 AMB_TASK_CONCURRENCY=30
 
+# 下载节点列表,多节点时分配下载关键在或下载任务使用
 nodeno=ambot_00
+
+# 并发任务数
 concurrency=25
 
-# log function
+# 日志输出
 amlog(){
     ts=$(date "+%Y-%m-%d %H:%M:%S");
     echo ${ts} ${1}
