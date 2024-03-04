@@ -1,51 +1,59 @@
 #!/bin/bash
 
+# Google Shell Script Coding Style Reference
+# https://google.github.io/styleguide/shellguide.html
+
 ###############################################################################
-# 命令选项
-# -s 同步远程下载文件 
-# -d 删除废弃的文件
-# -r 从仓库中提取文件
-# -f 刷新路径缓存
-#
-# 服务安装
+# install
 # * * * * * /soft/amarc/amarc -s 1>>/soft/amarc/log/sync.txt &
 # * * * * * /soft/amarc/amarc -d 1>>/soft/amarc/log/delete.txt &
 # * * * * * /soft/amarc/amarc -r 1>>/soft/amarc/log/retrieve.txt &
 ###############################################################################
 
-# 本地文件管理
-remote_host=wangzh@warmcode.net
-remote_repo_path=/data/res/in
-local_repo_path=/media/hd0/repository/00
-local_temp_path=temp
+# DIRECTORIES
+#------------------------------------------------------------------------------
+# var/renew
+# RENEW_DIR
+#
+#------------------------------------------------------------------------------
+export PATH=${PATH}:/soft/redis/bin:
 
-download_lock=.download.lock
-retrieve_lock=.retrieve.lock
-
-REDIS_PWD='abc123'
-REDIS_CMD="/soft/redis/redis-master/bin/redis-cli -a ${REDIS_PWD}"
+RENEW_DIR=var/renew
+BACK_DIR=var/feedback
 
 # set redis string value
 redis_set(){
 	dkey="$1";
 	dval="$2";
-	${REDIS_CMD} set "${dkey}" "${dval}" &>/dev/null;
+	${redis_cmd} set "${dkey}" "${dval}" &>/dev/null;
 }
 
 # get redis string value
 redis_get(){
 	dkey="${1}";
-	${REDIS_CMD} get "${dkey}" 2>/dev/null;
+	${redis_cmd} get "${dkey}" 2>/dev/null;
 }
 
 # delete redis string value
 redis_delete(){
     dkey="${1}";
-	${REDIS_CMD} del "${dkey}" &>/dev/null;
+	${redis_cmd} del "${dkey}" &>/dev/null;
 }
 
 # download documents from remote server
+# 1. download file from remote host into local templary directory.
+# 2. check md5sum of local file against the remote version.
+# 3. move local file to destination,
+# 4. regist file path into access cache in redis.
+# 5. remove remote file.
 sync(){
+    remote_repo_path=/soft/ambot/var/output/
+    remote_host=wangzh@warmcode.net
+    local_repo_path=/media/hd0/repository/0000
+    local_temp_path=temp
+
+    download_lock=.download.lock
+
 	if [ -e ${download_lock} ]; then
 	    return;
 	fi
@@ -75,70 +83,391 @@ sync(){
 	rm ${download_lock}
 }
 
+# 新版本的文件同步方法，可插入业务处理逻辑
+sync_cover(){
+    REMOTE_HOST=wangzh@warmcode.net
+    REMOTE_PATH=/var/cover
+    LOCAL_PATH=/data/cover
+    
+    count=$(ssh ${REMOTE_HOST} "ls ${REMOTE_PATH}/*.png 2>/dev/null | wc -l");
+    if [ ${count} -eq 0  ]; then
+        amlog "NO FILE TO SYNCHRONIZE."
+        exit;
+    fi
+    
+    ssh ${REMOTE_HOST} "ls ${REMOTE_PATH}/*.png" | while read file; do
+    	scp ${REMOTE_HOST}:${file} ${LOCAL_PATH}/;
+    	if [ $? -eq 0 ]; then
+    	    # 在循环中执行ssh时，会一次性读完stdin里所有的内容，导致后续命令无法处理。
+    	    # 这里使用-n选项解决这个问题。
+            ssh -n ${REMOTE_HOST} "rm -v ${file}";
+
+			    book_code=$(echo ${file} | grep '[0-9a-z\-]\{36\}' -o);
+			    url="http://192.168.1.5:4000/solite/histogram?bookCode=${book_code}"
+			    amlog "计算直方图: ${url}"
+
+			    curl -X GET "${url}" &>/dev/null;
+			    if [ $? -eq 0 ]; then
+			    	amlog "直方图计算成功: ${book_code}";
+			    else
+			    	amlog "直方图计算失败: ${book_code}";
+			    fi
+    	fi
+    
+    done
+}
+
 # remove documents from local repository
 delete_from_repository(){
-	${DB_CON} "select book_code from book where opstatus='04'" 2>/dev/null | while read bcode
+	if [ -e ".delete_lock" ]; then
+		return;
+	fi
+	touch ".delete_lock";
+
+	${mysql_cmd} "select book_code from book where opstatus='04'" 2>/dev/null | while read bcode
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ ! -z ${bpath} ]; then
 			mv -v "${bpath}" "trash/" &>/dev/null;
 			if [ $? -eq 0 ]; then
-				${DB_CON} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
+				${mysql_cmd} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
+			    ${mysql_cmd} "update da set opstatus='05' where fr=\"${bcode}\"" &>/dev/null;
 			    redis_delete "${bcode}";
 		        amlog "${bcode} : ${bpath}";
 			fi
 		else
-			echo "FILE NOT FOUND: ${bcode}";
+			amlog "FILE NOT FOUND: ${bcode},also removed from database.";
+			${mysql_cmd} "update book set opstatus='05' where book_code=\"${bcode}\"" &>/dev/null;
 		fi
 	done;
+	
+	rm ".delete_lock";
 }
 
 # refresh redis cache
 # 1. add local items into cache
 # 2. remove invalid ones.
 refresh_redis(){
-	repository_path=/media/hd0/repository/00;
+	repository_path=${1};
+	if [ ! -e ${repository_path} ]; then
+		amlog "path: ${repository_path} not exist.";
+	    return;
+	fi
+
+	amlog "procesing: ${repository_path}";
 	ls ${repository_path} | while read file
 	do
 		fcode=${file:0:36}
-	    fpath="${repository_path}/${file}";
+		fpath="${repository_path}${file}";
 		redis_set "${fcode}" "${fpath}";
 		amlog "${fcode} : ${fpath}";
 	done
 }
 
+# refresh redis cache
+refresh_all(){
+	ls -dR /media/*/*/* | grep "/media/hd[0-9]\{1\}/repository/[0-9]\{4\}" | while read path; do
+		refresh_redis "${path}";
+	done
+}
+
 # retrieve items from local repository
 retrieve_from_repository(){
+    retrieve_lock=.retrieve.lock
+
     if [ -e ${retrieve_lock} ]; then
-	    echo "retrieve process is already running now!";
+	    amlog "retrieve process is already running now!";
         return;
 	fi
 
 	touch ${retrieve_lock};
 
-    ${DB_CON} "select book_code from bag where bag_status=0" 2>/dev/null | while read bcode
+    ${mysql_cmd} "select book_code from bag where bag_status=0" 2>/dev/null | while read bcode
 	do
 	    bpath=$(redis_get ${bcode});
 	    if [ -z ${bpath} ]; then
 			amlog "file not found in local repository: ${bcode}";
 		else
-			bname=$(${DB_CON} "select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book where book_code=\"${bcode}\"" 2>/dev/null);
+		    bsql="select concat(book_name,concat('_M',LPAD(pk_book,10,0))) from book \
+			      where book_code=\"${bcode}\"";
+			bname=$(${mysql_cmd} "${bsql}" 2>/dev/null);
+
 		    amlog "${bpath} -> ${bname}.pdf";
 		    cp -v ${bpath} "trunk/${bname}.pdf" &>/dev/null;
-			${DB_CON} "update bag set bag_status=1 where book_code=\"${bcode}\"" 2>/dev/null;
+			${mysql_cmd} "update bag set bag_status=1 where book_code=\"${bcode}\"" 2>/dev/null;
 		fi
 	done
 
 	rm ${retrieve_lock}
 }
 
+# delete files with  file list
+delete_with_file(){
+	file=$1;
+	if [ ! -e ${file} ]; then
+		amlog "file ${file} not exists.";
+	    return;
+	fi
+
+	amlog "removing file right now!";
+	cat "${file}" | grep 'M[0-9]\{10\}' -o | sed 's/M[0]\{0,10\}//g' | while read fid
+	do
+		amlog "removeing file: ${fid}";
+	    ${mysql_cmd} "update book set opstatus='04' where pk_book=${fid}" 2>/dev/null;
+	done
+}
+
+# retrieve documents by publisher
+retrieve_by_publisher(){
+	keyword=$1
+	query_sql="select book_code from book where \
+	    publisher=\"${keyword}\" \
+	and opstatus!='05' \
+	and attribute!='09' \
+	and deprecated!=1";
+
+	${mysql_cmd} "${query_sql}" 2>/dev/null | while read code
+	do
+		amlog "${code}";
+		update_sql="insert into bag(add_time,bag_status,book_code,status,ts) \ 
+		values(now(),0,\"${code}\",0,now())";
+	    ${mysql_cmd} "${update_sql}" 2>/dev/null;
+	done
+}
+
+# retrieve documents by keyword
+# 1. match target document with keyword,put it into bag.
+# 2. retrieve document by batch task.
+retrieve_by_keyword(){
+	keyword=$1
+	
+	fetch_sql="select book_code from book where \
+	    book_name like \"%${keyword}%\" \
+	    and opstatus!='05' \
+	    and attribute!='09' \
+	    and deprecated!=1"
+
+	${mysql_cmd} "${fetch_sql}" 2>/dev/null | while read code
+	do
+		amlog "retrieving: ${code}";
+		sql="insert into bag(add_time,bag_status,book_code,status,ts) \
+		     values(now(),0,\"${code}\",0,now())";
+	    ${mysql_cmd} "${sql}" 2>/dev/null;
+	done
+}
+
+# update file name from the pre-processing file
+update_file_name(){
+	listname=$1;
+	if [ ! -e "${listname}" ]; then
+		amlog "File does not exist.[$listname]";
+		exit 1;
+	fi
+
+	cat "${listname}" | while read file; do
+		filename=$(${mysql_cmd} "select book_name from book where book_code=\"${file}\"" 2>/dev/null);
+		amlog "file: ${file}: ${filename}";
+		${mysql_cmd} "update book set book_name=\"${filename}\" where book_name=\"${file}\"" 2>/dev/null;
+	done
+}
+
+retrieve_file_group(){
+    amlog "retrieving group file";
+    ${mysql_cmd} "select group_path from bag where bag_status=10" | while read ditem; do
+		amlog "item to process: $ditem";
+		dpath=$(echo $ditem | awk -F\| '{print $1}');
+		dcode=$(echo $ditem | awk -F\| '{print $2}');
+		dname=$(echo $ditem | awk -F\| '{print $3}');
+
+		tpath=$(redis_get "${dcode}");
+		if [ -z "${tpath}" ]; then
+			amlog "local file not exist.";
+		    ${mysql_cmd} "update bag set bag_status=11 where group_path=\"${ditem}\"";
+		    continue;
+		fi
+
+		printf "dir: %s,, code: %s, name %s\n"  "$dpath" "$dcode" "$dname";
+		printf "target: %s\n"  "$tpath";
+
+		mtdir="trunk/${dpath}";
+
+		mkdir -p "${mtdir}";
+		cp "${tpath}" "${mtdir}/${dname}";
+		${mysql_cmd} "update bag set bag_status=11 where group_path=\"${ditem}\"";
+    done
+}
+
+remove_by_id_list(){
+    file="$1";
+	if [ ! -e "${file}" ]; then
+		amlog "file not exists."
+		exit 1;
+	fi
+
+	amlog $file;
+
+	cat "${file}" | grep '\_[0-9]\{1,6\}.pdf' -o | grep '[0-9]\{1,6\}' -o | while read bid; do
+	    amlog "file: $bid";
+#	    usql="update book set opstatus='04' where pk_book=${bid}";
+#		echo "sql: ${usql}";
+		${mysql_cmd} "${usql}";
+	done
+}
+
+# update documents with refined ones
+# 1. remove original by bk_book 
+# 2. upload new version then check it in.
+renew_documents(){
+	ls ${RENEW_DIR}/*.pdf &>/dev/null;
+	if [ $? -ne 0 ]; then
+		amlog "no document to refine.";
+	    return
+	fi
+
+    ls ${RENEW_DIR}/*.pdf | while read path; do
+	    dgst=$(alcc "${path}" | awk -F\| '{print $5}')
+		count_sql="select count(book_code) from book where hash=\"${dgst}\""
+	    bcount=$(${mysql_cmd} "${count_sql}" 2>/dev/null);
+
+	    if [ $bcount -eq 0 ]; then
+	        bkey=$(echo ${path} | grep 'M[0-9]\{10\}' -o | sed 's/M[0]\{1,10\}//g');
+	        bname=$(basename "$path");
+	        nname=$(echo "${bname}" | sed 's/_M[0-9]\{10\}//g');
+
+	        mv -v "$path" "${BACK_DIR}/${nname}";
+	        sql="update book set opstatus='04' where pk_book=${bkey}";
+	        ${mysql_cmd} "$sql" 2>/dev/null;
+	    else
+	        amlog "Document ($path) already exists,not refined."
+	    fi
+    
+	    amlog ">: $path, $dgst,$bcount,$bkey,$nname";
+    done
+}
+
+# query document count in bag 
+bag_count(){
+	query_sql="select count(book_code) from bag where bag_status!=1"
+    count=$(${mysql_cmd} "${query_sql}" 2>/dev/null);
+    amlog "${count} documents left.";
+}
+
+# move local documents to remote server
+# 1. check spare disk space on remote host,if there's not sufficiant space left ,then quit.
+# 2. upload 5 files to temporary directory,then move to destination.
+# 3. do step 2, until no files left.
+move_to_repository(){
+    target_type="*.pdf";
+
+    temp_dir='/soft/ambot/var/transfer-in-1/';
+    dest_dir='/soft/ambot/var/raw/';
+    dest_rep='wangzh@warmcode.net';
+    local_dir="${BACK_DIR}";
+
+    sync_lock='.sync.lock';
+    if [ -e "${sync_lock}" ]; then
+        amlog "another task is running.";
+        exit 1;
+    fi
+    touch "${sync_lock}";
+
+	count=$(ls -rS ${local_dir}/${target_type} 2>/dev/null | wc -l);
+#if [ ${count} -ne 0 ]; then
+#       amlog "No file to synchronize.";
+#       return;
+#   fi
+
+    while [ ${count} -gt 0 ]; do
+        # lefe space on remote server.
+		left_space=$(ssh ${dest_rep} "df /dev/vda1 | grep vda1" | awk '{print $4}');
+
+		if [ ${left_space} -lt 2000000 ]; then
+			amlog "No sufficiant disk space: ${left_space}/2000000";
+		    sleep 60;
+			continue;
+		fi
+
+        amlog "${count} files to move.";
+        batch_count=5;
+
+        ls -rS ${local_dir}/${target_type} 2>/dev/null | head -${batch_count} | while read file
+        do
+		    amlog "${file}"
+            scp "${file}" "${dest_rep}:${temp_dir}"
+            if [ $? -eq 0 ]; then
+                rm "${file}";
+            fi
+        done
+        ssh ${dest_rep} "mv -v ${temp_dir}*.pdf ${dest_dir}";
+
+        count=$(ls -rS ${local_dir}/${target_type} 2>/dev/null | wc -l);
+    done
+
+    rm "${sync_lock}";
+}
+
+# 清理已经删除掉的文件集合
+clear_removed_files(){
+    des_path="/media/hd4/repository/30/"
+    indb_file="indb.txt"
+    
+    ${mysql_cmd} 'select book_code from book where opstatus!="05"' > "${indb_file}"
+    
+    cat ${indb_file} | while read bcode; do
+      path=$(${redis_cmd} get ${bcode} 2>/dev/null);
+        
+    	echo "${bcode} : ${path}"
+    	if [ -e "${path}" ]; then
+    	    mv -v "${path}" "${des_path}";
+    	else
+    	    echo "文件不存在或者已经被移动了."
+    	fi
+    done
+
+}
+
+# 清理掉已经删除掉的文件集合
+# 1. 数据库中已经删除掉，但是磁盘上还有的文件，直接删除磁盘文件。
+# 2. 本地磁盘不存在，数据库中还有记录的数据，文件标识为已经删除即可。
+# TODO 尚未开发完成
+clean_all_removed_files(){
+    echo "查询现存文件";
+    #find /media/ -name "*.pdf" | grep '[0-9a-z\-]\{36\}' -o > existing_code.txt;
+    
+    echo "查询数据库文件";
+    #${mysql_cmd} 'select book_code from book where opstatus!="05"' > indb.txt;
+    
+    # 在磁盘上存在,但是数据库中已经没有了,直接从磁盘上删除就可以了.
+    #grep -findb.txt inrep.txt -v > removed_from_db.txt
+    
+    cat removed_from_db.txt | while read code; do
+        file=$(${redis_cmd} get ${code} 2>/dev/null);   
+        echo "code: ${code},file: ${file}";
+    done
+    
+    # 数据库中存在,但是磁盘上没有了,直接更新数据库状态为删除
+    #grep -finrep.txt indb.txt -v > removed_from_rep.txt
+    
+    #head m.txt | while read file; do
+    #    code=$(echo ${file} | grep '[0-9a-z\-]\{36\}' -o);
+    #    echo "file: ${file} ${code}";
+    #done
+}
+
+
 usage(){
-    echo "Usage: $0 [options]";
-	echo "  -s download documents from remote server.";
-	echo "  -r retrieve documents from local repository";
+  echo "Usage: $0 [options]";
+	echo "  -c delete files with filename list";
 	echo "  -d remove items from local reposirory";
 	echo "  -f update redis cache";
-	echo "  -t for test"
+	echo "  -F update all document into redis cache";
+	echo "  -g retrive file group";
+	echo "  -l retrieve file by keyword";
+	echo "  -N update filename from the pre-processing file."
+	echo "  -r retrieve documents from local repository";
+	echo "  -R remove by id list.";
+	echo "  -s download documents from remote server.";
+	echo "  -t for test";
 }
 
 basepath=$(cd `dirname $0`;pwd);
@@ -146,13 +475,24 @@ cd ${basepath}
 
 . .amarcres
 
-while getopts "srdft" opt; do
-    case ${opt} in
-		s){ sync; exit; };;
-        f){ refresh_redis; exit; };;
-        t){ test_redis_delete; exit; };;
-        d){ delete_from_repository; exit; };;
+while getopts "CbsSrR:df:Ftc:l:L:N:gu" opt; do
+  case ${opt} in
+    b){ bag_count; exit; };;
+		c){ delete_with_file ${OPTARG}; exit; };;
+		C){ sync_cover; exit; };;
+    d){ delete_from_repository; exit; };;
+    f){ refresh_redis ${OPTARG}; exit; };;
+    F){ refresh_all; exit; };;
+		g){ retrieve_file_group; exit; };;
+		l){ retrieve_by_keyword "${OPTARG}"; exit; };;
+		L){ retrieve_by_publisher "${OPTARG}"; exit; };;
+		N){ update_file_name ${OPTARG}; exit; };;
 		r){ retrieve_from_repository; exit; };;
+		R){ remove_by_id_list ${OPTARG}; exit; };;
+		s){ sync; exit; };;
+		S){ move_to_repository; exit; };;
+		u){ renew_documents; exit; };;
+    t){ test_redis_delete; exit; };;
 	esac
 done
 
